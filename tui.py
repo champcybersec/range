@@ -1,3 +1,4 @@
+
 import requests
 import json
 import time
@@ -41,6 +42,7 @@ if __name__ == "__main__":
 4. Destroy ALL range VMs
 5. Create range VMs for multiple users
 6. Create new user
+7. Bulk Create Users
 Q. Quit"""
         )
         c = input("> ")
