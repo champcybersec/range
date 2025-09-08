@@ -9,7 +9,7 @@ from random import randint
 
 from pveautomate.automate import ProxmoxManager
 
-PROX_URL = os.getenv("PROXMOX_URL", "https://192.168.3.236:8006") + "/api2/json"
+PROX_URL = os.getenv("PROXMOX_URL", "https://10.10.105.10:8006") + "/api2/json"
 
 
 def load_csv(file_name):
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 4. Destroy ALL range VMs
 5. Create range VMs for multiple users
 6. Create new user
-7. Bulk Create Users
+7. Bulk Create Users (if not existing already)
 Q. Quit"""
         )
         c = input("> ")
