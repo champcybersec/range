@@ -93,7 +93,9 @@ function Ensure-GroupMembership {
         return
     }
 
-    Write-Host "[ADD] Adding" ($User ? $User.SamAccountName : "<new user>") "to" $GroupName
+    $displayName = "<new user>"
+    if ($User) { $displayName = $User.SamAccountName }
+    Write-Host "[ADD] Adding" $displayName "to" $GroupName
     if ($WhatIfOnly -or -not $User) { return }
 
     try {
