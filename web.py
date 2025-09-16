@@ -201,7 +201,7 @@ def clone_page():
         )
         # Grant Administrator role to username@ad on this VM
         prox.access.acl.put(path=f"/vms/{new_vmid}", users=f"{username}@ad", roles="Administrator")
-        return render_template("page.html", content=f"<h2>Cloned VMID {vmid} to {new_vmid} and granted Administrator to {username}@ad</h2>")
+        return render_template("page.html", content=f"<h2>Cloned VMID {vmid} to {new_vmid} and granted Administrator to {username}@ad</h2><p>Next, log into Proxmox at <a href='https://192.168.3.236:8006' target='_blank' rel='noopener'>https://192.168.3.236:8006</a></p>")
     except Exception as e:
         return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
 

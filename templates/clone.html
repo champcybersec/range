@@ -1,8 +1,11 @@
 <form method="POST">
     <label for="username">Username (without realm):</label>
     <input type="text" id="username" name="username" required />
-    <label for="vmid">Template VMID to clone:</label>
-    <input type="number" id="vmid" name="vmid" required />
+    <label for="vmid">Template to clone:</label>
+    <select id="vmid" name="vmid" required>
+        <option value="129">Linux</option>
+        <option value="130">Windows</option>
+    </select>
     <button type="submit">Clone and Grant Admin</button>
 </form>
 
