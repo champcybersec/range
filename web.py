@@ -1,30 +1,43 @@
 from flask import Flask, render_template, request, make_response, redirect
-from pveautomate.automate import ProxmoxManager
-import getpass, os
-from random import randint
-
-PROX_URL = os.getenv("PROXMOX_URL", "https://192.168.3.236:8006") + "/api2/json"
+from proxmoxer import ProxmoxAPI
+import os
+import random
+import tomli
 
 app = Flask(__name__)
 
-proxmox_url = PROX_URL
-proxmox_user = "root@pam"
-# proxmox_password = getpass.getpass(f"Authenticate for {proxmox_user}: ")
-proxmox_password = open(".pvepw").read().strip()
-node = "pve"
 
-SUPER_SECRET = open(".passkey").read().strip()
+def load_secrets():
+    with open(os.path.join(os.path.dirname(__file__), "secrets.toml"), "rb") as f:
+        return tomli.load(f)
+
+
+secrets = load_secrets()
+PROXMOX_HOST = secrets["proxmox"]["host"]  # e.g. 192.168.3.236
+PROXMOX_USER = secrets["proxmox"]["user"]  # e.g. root@pam
+PROXMOX_PASSWORD = secrets["proxmox"]["password"]
+PROXMOX_VERIFY_SSL = secrets["proxmox"].get("verify_ssl", True)
+PROXMOX_NODE = secrets["proxmox"].get("node", "pve")
+
+SUPER_SECRET = secrets.get("web", {}).get("admin_password", "changeme")
 AUTHK = "yup"
 
-def_user_pw = "neccdc2025"
+DEFAULT_USER_PASSWORD = secrets.get("web", {}).get("default_user_password", "ChangeMe123!")
 
-pm = ProxmoxManager(proxmox_url, proxmox_user, proxmox_password, node)
+
+def get_proxmox() -> ProxmoxAPI:
+    return ProxmoxAPI(
+        PROXMOX_HOST,
+        user=PROXMOX_USER,
+        password=PROXMOX_PASSWORD,
+        verify_ssl=PROXMOX_VERIFY_SSL,
+    )
 
 
 @app.route("/")
 def home():
     return render_template(
-        "page.html", content="<h2>Home</h2><p><a href='/selfserve'>Self Serve VMs</a><br/><br/><a href='/login'>Admin Login</a>"
+        "page.html", content="<h2>Home</h2><p><a href='/selfserve'>Self Serve VMs</a><br/><a href='/clone'>Clone VM</a><br/><br/><a href='/login'>Admin Login</a>"
     )
 
 
@@ -61,7 +74,7 @@ def logout():
 @app.route("/admin")
 def adm():
     if request.cookies.get("sk-lol") == AUTHK:
-        return render_template("admin.html", prox_login=proxmox_user, passw=def_user_pw)
+        return render_template("admin.html", prox_login=PROXMOX_USER, passw=DEFAULT_USER_PASSWORD)
     else:
         return redirect("/login?next=/admin")
 
@@ -77,8 +90,11 @@ def ensure():
 
         for username in usernames:
             uid = username + "@pve"
-            if not pm.check_if_user(uid):
-                pm.create_user(username, def_user_pw, "pve")
+            # Create a PVE local user if missing (migration helper)
+            prox = get_proxmox()
+            users = prox.access.users.get()
+            if not any(u.get("userid") == uid for u in users):
+                prox.access.users.post(userid=uid, password=DEFAULT_USER_PASSWORD)
 
         return "Wahoo"
 
@@ -95,8 +111,20 @@ def mrange():
     print("For Users: ", users)
 
     try:
+        prox = get_proxmox()
         for user in users:
-            pm.create_range(vmids, user + "@pve")
+            for base_vmid in vmids:
+                # Create a clone name and ID
+                new_vmid = prox.cluster.nextid.get()
+                name = f"{user}-range-{base_vmid}"
+                prox.nodes(PROXMOX_NODE).qemu(base_vmid).clone.post(
+                    newid=new_vmid,
+                    name=name,
+                    full=1,
+                    target=PROXMOX_NODE,
+                )
+                # Assign Administrator to user@pve (legacy path)
+                prox.access.acl.put(path=f"/vms/{new_vmid}", users=f"{user}@pve", roles="Administrator")
         return "Wahoo"
     except Exception as e:
         return str(e)
@@ -117,7 +145,18 @@ def selfserve():
         user = request.form.get("username")
         password = request.form.get("password")
 
-        if pm.validate_creds(user+"@pve", password):
+        # Basic auth check using PVE user (optional legacy support)
+        try:
+            ProxmoxAPI(
+                PROXMOX_HOST,
+                user=f"{user}@pve",
+                password=password,
+                verify_ssl=PROXMOX_VERIFY_SSL,
+            )
+            valid = True
+        except Exception:
+            valid = False
+        if valid:
             os = request.form.get("os")
             if os == "win":
                 vmid = 2001
@@ -125,9 +164,15 @@ def selfserve():
                 vmid = 2000
 
             try:
-                nvmid = randint(3000, 3999)
-                pm.clone_vm(vmid, f"{user}-{os}-self", nvmid)
-                pm.assign_admin_vm_permissions(nvmid, user + "@pve")
+                prox = get_proxmox()
+                nvmid = prox.cluster.nextid.get()
+                prox.nodes(PROXMOX_NODE).qemu(vmid).clone.post(
+                    newid=nvmid,
+                    name=f"{user}-{os}-self",
+                    full=1,
+                    target=PROXMOX_NODE,
+                )
+                prox.access.acl.put(path=f"/vms/{nvmid}", users=f"{user}@pve", roles="Administrator")
                 return render_template("page.html", content=f"<h2>VM Created: {nvmid}</h2>")
             except Exception as e:
                 return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
@@ -136,6 +181,29 @@ def selfserve():
             resp.set_cookie("flash", "Incorrect Password")
             return resp
 
+
+@app.route("/clone", methods=["GET", "POST"])
+def clone_page():
+    if request.method == "GET":
+        return render_template("page.html", content=render_template("clone.html"))
+    username = request.form.get("username").strip()
+    vmid = int(request.form.get("vmid"))
+    if not username or not vmid:
+        return render_template("page.html", content="<h2>Username and VMID required</h2>"), 400
+    try:
+        prox = get_proxmox()
+        new_vmid = prox.cluster.nextid.get()
+        prox.nodes(PROXMOX_NODE).qemu(vmid).clone.post(
+            newid=new_vmid,
+            name=f"{username}-clone-{vmid}",
+            full=1,
+            target=PROXMOX_NODE,
+        )
+        # Grant Administrator role to username@ad on this VM
+        prox.access.acl.put(path=f"/vms/{new_vmid}", users=f"{username}@ad", roles="Administrator")
+        return render_template("page.html", content=f"<h2>Cloned VMID {vmid} to {new_vmid} and granted Administrator to {username}@ad</h2>")
+    except Exception as e:
+        return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
 
 @app.errorhandler(404)
 def page_not_found(e):
