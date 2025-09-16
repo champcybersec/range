@@ -37,7 +37,7 @@ def get_proxmox() -> ProxmoxAPI:
 @app.route("/")
 def home():
     return render_template(
-        "page.html", content="<h2>Home</h2><p><a href='/selfserve'>Self Serve VMs</a><br/><a href='/clone'>Clone VM</a><br/><br/><a href='/login'>Admin Login</a>"
+        "page.html", content="<h2>Home</h2><p><a href='/clone'>Clone VM</a><br/><br/><a href='/login'>Admin Login</a>"
     )
 
 
@@ -120,7 +120,7 @@ def mrange():
                 prox.nodes(PROXMOX_NODE).qemu(base_vmid).clone.post(
                     newid=new_vmid,
                     name=name,
-                    full=1,
+                    full=0,
                     target=PROXMOX_NODE,
                 )
                 # Assign Administrator to user@pve (legacy path)
@@ -169,7 +169,7 @@ def selfserve():
                 prox.nodes(PROXMOX_NODE).qemu(vmid).clone.post(
                     newid=nvmid,
                     name=f"{user}-{os}-self",
-                    full=1,
+                    full=0,
                     target=PROXMOX_NODE,
                 )
                 prox.access.acl.put(path=f"/vms/{nvmid}", users=f"{user}@pve", roles="Administrator")
@@ -196,7 +196,7 @@ def clone_page():
         prox.nodes(PROXMOX_NODE).qemu(vmid).clone.post(
             newid=new_vmid,
             name=f"{username}-clone-{vmid}",
-            full=1,
+            full=0,
             target=PROXMOX_NODE,
         )
         # Grant Administrator role to username@ad on this VM
