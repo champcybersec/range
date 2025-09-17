@@ -130,6 +130,13 @@ class ProxmoxManager:
         except Exception as e:
             print(f"Error setting user group: {e}")
 
+    def sync_realm(realm="ad")
+        try:
+            self.proxmox.access.domains(realm).sync.post()
+            print(f"Synced '{realm}' realm")
+        except Exception as sync_err:
+            print(f"Warning: realm sync for '{realm}' failed or not available: {sync_err}")
+
 
     def ensure_user_vnet(self, username, realm="ad"):
         """Ensure a per-user VNet exists under the CMPCCDC zone.
@@ -140,15 +147,9 @@ class ProxmoxManager:
         - Reload SDN to apply changes
         """
         try:
-            # Prefer to sync the external realm first to ensure users/groups are fresh
-            try:
-                self.proxmox.access.domains(realm).sync.post()
-                print(f"Synced '{realm}' realm")
-            except Exception as sync_err:
-                print(f"Warning: realm sync for '{realm}' failed or not available: {sync_err}")
-
+ 
             zone_name = "CMPCCDC"
-            vnet_name = f"{username}-vnet"
+            vnet_name = f"{username}RANGENET"
 
             # Check existing SDN VNets
             vnets = self.proxmox.cluster.sdn.vnets.get()
@@ -262,9 +263,11 @@ Q. Quit"""
                     else:
                         print(f"{username} exists. Might have to manually check group?")
         elif c == "8":
+            manager.sync_realm()
             manager.ensure_user_vnet(input("Username: "))
         elif c == "9":
             print("Checking VNet for all users")
+            manager.sync_realm()
             users = manager.get_users()
             for user in users:
                 if user['userid'].endswith("@ad"):
