@@ -164,6 +164,8 @@ class ProxmoxManager:
                 #print("Did not split " + username)
                 tb = ['N', username[0]]
 
+            # TODO: initial conflicts lol
+
             vnet_name = f"RN{tb[0][0]}{tb[1][0]}"
 
             with open(".vnet","a+") as f:
