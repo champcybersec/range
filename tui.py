@@ -2,15 +2,25 @@
 import requests
 import json
 import time
-import getpass
 import urllib3
 import csv, os, sys
 from random import randint
+import tomli
 
 from proxmoxer import ProxmoxAPI
 
-PROX_URL = os.getenv("PROXMOX_URL", "https://10.10.105.10:8006")
+def load_secrets():
+    with open(os.path.join(os.path.dirname(__file__), "secrets.toml"), "rb") as f:
+        return tomli.load(f)
 
+
+secrets = load_secrets()
+PROXMOX_HOST = secrets["proxmox"]["host"]
+PROXMOX_USER = secrets["proxmox"]["user"]
+PROXMOX_PASSWORD = secrets["proxmox"]["password"]
+PROXMOX_VERIFY_SSL = secrets["proxmox"].get("verify_ssl", True)
+PROXMOX_NODE = secrets["proxmox"].get("node", "pve")
+DEFAULT_USER_PASSWORD = secrets.get("web", {}).get("default_user_password", "ChangeMe123!")
 
 class ProxmoxManager:
     def __init__(self, proxmox_url, proxmox_user, proxmox_password, node):
@@ -22,7 +32,7 @@ class ProxmoxManager:
             proxmox_url,
             user=proxmox_user,
             password=proxmox_password,
-            verify_ssl=False
+            verify_ssl=PROXMOX_VERIFY_SSL
         )
         self.node = node
         self.vm_data = {}
@@ -177,12 +187,7 @@ def load_csv(file_name):
 
 
 if __name__ == "__main__":
-    proxmox_url = PROX_URL
-    proxmox_user = "root@pam"
-    proxmox_password = getpass.getpass(f"Authenticate for {proxmox_user}: ")
-    node = "pve"
-
-    manager = ProxmoxManager(proxmox_url, proxmox_user, proxmox_password, node)
+    manager = ProxmoxManager(PROXMOX_HOST, PROXMOX_USER, PROXMOX_PASSWORD, PROXMOX_NODE)
 
     running = True
 
@@ -235,17 +240,14 @@ Q. Quit"""
             kaboom = input("Comma-seperated list to remove (NO CONFIRMATION): ")
             for id in kaboom.split(","):
                 manager.destroy_vm(int(id))
-        elif c == "4":
+        elif c ==.         elif c == "4":
             manager.destroy_range()
         elif c == "6":
             manager.create_user(
-                input("Username: "), getpass.getpass("Password: "), "pve"
+                input("Username: "), input("Password: "), "pve"
             )
         elif c == "7": # TODO: this is all @pve still
             fn = input("Filename CSV of users: ")
-            newpw = getpass.getpass(
-                "Default password for any users we need to create: "
-            )
             rows = load_csv(fn)
             if rows is None:
                 print("No such file, or other error")
@@ -255,7 +257,7 @@ Q. Quit"""
                     username = row[0]
                     group = "Proxmox_Users" if row[1] == "user" else "Proxmox_Admins"
                     if not manager.check_if_user(username + "@pve"):  # doesn't exist
-                        manager.create_user(username, newpw, "pve")
+                        manager.create_user(username, DEFAULT_USER_PASSWORD, "pve")
                         #manager.set_user_group(username + "@pve", group)
                         print(f"Created {username}@pve")
                     else:
