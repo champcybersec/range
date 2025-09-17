@@ -130,12 +130,20 @@ class ProxmoxManager:
         except Exception as e:
             print(f"Error setting user group: {e}")
 
-    def sync_realm(realm="ad")
+    def sync_realm(self, realm="ad")
         try:
             self.proxmox.access.domains(realm).sync.post()
             print(f"Synced '{realm}' realm")
         except Exception as sync_err:
             print(f"Warning: realm sync for '{realm}' failed or not available: {sync_err}")
+
+    def net_reload(self):
+        # Apply SDN config changes
+            try:
+                self.proxmox.cluster.sdn.reload.post()
+                print("Reloaded SDN configuration")
+            except Exception as reload_err:
+                print(f"Warning: SDN reload failed: {reload_err}")
 
 
     def ensure_user_vnet(self, username, realm="ad"):
@@ -164,13 +172,6 @@ class ProxmoxManager:
                 print(f"Created VNet '{vnet_name}' in zone '{zone_name}'")
             else:
                 print(f"VNet '{vnet_name}' already exists in zone '{zone_name}'")
-
-            # Apply SDN config changes
-            try:
-                self.proxmox.cluster.sdn.reload.post()
-                print("Reloaded SDN configuration")
-            except Exception as reload_err:
-                print(f"Warning: SDN reload failed: {reload_err}")
 
         except Exception as e:
             print(f"Error ensuring VNet for {username}: {e}")
@@ -265,6 +266,7 @@ Q. Quit"""
         elif c == "8":
             manager.sync_realm()
             manager.ensure_user_vnet(input("Username: "))
+            manager.net_reload()
         elif c == "9":
             print("Checking VNet for all users")
             manager.sync_realm()
@@ -274,5 +276,6 @@ Q. Quit"""
                     username = user['userid'].split('@')[0]
                     print("Trying to ensure for " + username)
                     manager.ensure_user_vnet(username)
+            manager.net_reload()
         else:
             running = False
