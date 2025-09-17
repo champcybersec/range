@@ -157,7 +157,7 @@ class ProxmoxManager:
         try:
  
             zone_name = "CMPCCDC"
-            safe_un = username.replace(".","")[6:]
+            safe_un = username.replace(".","")[:5]
             vnet_name = f"RN{safe_un}"
 
             # Check existing SDN VNets
