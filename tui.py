@@ -157,8 +157,13 @@ class ProxmoxManager:
         try:
  
             zone_name = "CMPCCDC"
-            safe_un = username.replace(".","")[:5]
-            vnet_name = f"RN{safe_un}"
+            if '.' in username:
+                tb = username.split('.')
+            else:
+                tb = ['N', username[0]]
+            vnet_name = f"RN{tb[0]}{tb[1]}"
+            with open(".vnet","a+") as f:
+                f.write(vnet_name+"\n")
 
             # Check existing SDN VNets
             vnets = self.proxmox.cluster.sdn.vnets.get()
@@ -169,6 +174,7 @@ class ProxmoxManager:
                 self.proxmox.cluster.sdn.vnets.post(
                     vnet=vnet_name,
                     zone=zone_name,
+                    alias=username
                 )
                 print(f"Created VNet '{vnet_name}' in zone '{zone_name}'")
             else:
