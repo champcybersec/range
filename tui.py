@@ -264,10 +264,12 @@ Q. Quit"""
         elif c == "8":
             manager.ensure_user_vnet(input("Username: "))
         elif c == "9":
+            print("Checking VNet for all users")
             users = manager.get_users()
             for user in users:
-                if user['userid'].endswith("@pve"):
+                if user['userid'].endswith("@ad"):
                     username = user['userid'].split('@')[0]
+                    print("Trying to ensure for " + username)
                     manager.ensure_user_vnet(username)
         else:
             running = False
