@@ -130,7 +130,7 @@ class ProxmoxManager:
         except Exception as e:
             print(f"Error setting user group: {e}")
 
-    def sync_realm(self, realm="ad")
+    def sync_realm(self, realm="ad"):
         try:
             self.proxmox.access.domains(realm).sync.post()
             print(f"Synced '{realm}' realm")
