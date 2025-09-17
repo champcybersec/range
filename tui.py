@@ -7,10 +7,163 @@ import urllib3
 import csv, os, sys
 from random import randint
 
-from pveautomate.automate import ProxmoxManager
+from proxmoxer import ProxmoxAPI
 
-PROX_URL = os.getenv("PROXMOX_URL", "https://10.10.105.10:8006") + "/api2/json"
+PROX_URL = os.getenv("PROXMOX_URL", "https://10.10.105.10:8006")
 
+
+class ProxmoxManager:
+    def __init__(self, proxmox_url, proxmox_user, proxmox_password, node):
+        # Remove /api2/json from URL if present for proxmoxer
+        if proxmox_url.endswith("/api2/json"):
+            proxmox_url = proxmox_url.replace("/api2/json", "")
+        
+        self.proxmox = ProxmoxAPI(
+            proxmox_url,
+            user=proxmox_user,
+            password=proxmox_password,
+            verify_ssl=False
+        )
+        self.node = node
+        self.vm_data = {}
+
+    def read_vm_data(self):
+        """Read VM data from Proxmox"""
+        try:
+            vms = self.proxmox.nodes(self.node).qemu.get()
+            self.vm_data = {vm['vmid']: vm for vm in vms}
+            return self.vm_data
+        except Exception as e:
+            print(f"Error reading VM data: {e}")
+            return {}
+
+    def create_range(self, vmids, username):
+        """Create range VMs for a user by cloning existing VMs"""
+        try:
+            for base_vmid in vmids:
+                # Get next available VMID
+                new_vmid = self.proxmox.cluster.nextid.get()
+                name = f"{username}-range-{base_vmid}"
+                
+                # Clone the VM
+                self.proxmox.nodes(self.node).qemu(base_vmid).clone.post(
+                    newid=new_vmid,
+                    name=name,
+                    full=0,
+                    target=self.node
+                )
+                
+                # Assign Administrator role to user
+                self.proxmox.access.acl.put(
+                    path=f"/vms/{new_vmid}",
+                    users=f"{username}@pve",
+                    roles="Administrator"
+                )
+                print(f"Created VM {new_vmid} for {username}")
+        except Exception as e:
+            print(f"Error creating range: {e}")
+
+    def destroy_vm(self, vmid):
+        """Destroy a single VM"""
+        try:
+            self.proxmox.nodes(self.node).qemu(vmid).delete()
+            print(f"Destroyed VM {vmid}")
+        except Exception as e:
+            print(f"Error destroying VM {vmid}: {e}")
+
+    def destroy_range(self):
+        """Destroy all range VMs"""
+        try:
+            vms = self.proxmox.nodes(self.node).qemu.get()
+            range_vms = [vm for vm in vms if 'range' in vm.get('name', '').lower()]
+            for vm in range_vms:
+                self.proxmox.nodes(self.node).qemu(vm['vmid']).delete()
+                print(f"Destroyed range VM {vm['vmid']} ({vm.get('name', '')})")
+        except Exception as e:
+            print(f"Error destroying range VMs: {e}")
+
+    def create_user(self, username, password, realm="pve"):
+        """Create a new user"""
+        try:
+            userid = f"{username}@{realm}"
+            self.proxmox.access.users.post(
+                userid=userid,
+                password=password
+            )
+            print(f"Created user {userid}")
+        except Exception as e:
+            print(f"Error creating user {username}: {e}")
+
+    def check_if_user(self, userid):
+        """Check if a user exists"""
+        try:
+            users = self.proxmox.access.users.get()
+            return any(user.get('userid') == userid for user in users)
+        except Exception as e:
+            print(f"Error checking user {userid}: {e}")
+            return False
+
+    def get_users(self):
+        """Get all users"""
+        try:
+            users = self.proxmox.access.users.get()
+            return users
+        except Exception as e:
+            print(f"Error getting users: {e}")
+            return []
+
+    def set_user_group(self, userid, group):
+        """Set user group (Note: This is a simplified implementation)"""
+        try:
+            # Proxmox doesn't have direct group assignment via API
+            # This would typically be handled through ACL or other means
+            print(f"Note: Group assignment for {userid} to {group} would need manual configuration")
+        except Exception as e:
+            print(f"Error setting user group: {e}")
+
+
+    def ensure_user_vnet(self, username, realm="ad"):
+        """Ensure a per-user VNet exists under the CMPCCDC zone.
+
+        Steps:
+        - Force a sync of the specified auth realm (default: ad)
+        - Ensure a VNet named after the user exists in the CMPCCDC zone.
+        - Reload SDN to apply changes
+        """
+        try:
+            # Prefer to sync the external realm first to ensure users/groups are fresh
+            try:
+                self.proxmox.access.domains(realm).sync.post()
+                print(f"Synced '{realm}' realm")
+            except Exception as sync_err:
+                print(f"Warning: realm sync for '{realm}' failed or not available: {sync_err}")
+
+            zone_name = "CMPCCDC"
+            vnet_name = f"{username}-vnet"
+
+            # Check existing SDN VNets
+            vnets = self.proxmox.cluster.sdn.vnets.get()
+            vnet_exists = any(v.get("vnet") == vnet_name for v in vnets)
+
+            if not vnet_exists:
+                # Create a VNet for this user in the CMPCCDC zone
+                self.proxmox.cluster.sdn.vnets.post(
+                    vnet=vnet_name,
+                    zone=zone_name,
+                )
+                print(f"Created VNet '{vnet_name}' in zone '{zone_name}'")
+            else:
+                print(f"VNet '{vnet_name}' already exists in zone '{zone_name}'")
+
+            # Apply SDN config changes
+            try:
+                self.proxmox.cluster.sdn.reload.post()
+                print("Reloaded SDN configuration")
+            except Exception as reload_err:
+                print(f"Warning: SDN reload failed: {reload_err}")
+
+        except Exception as e:
+            print(f"Error ensuring VNet for {username}: {e}")
 
 def load_csv(file_name):
     try:
@@ -43,6 +196,8 @@ if __name__ == "__main__":
 5. Create range VMs for multiple users
 6. Create new user
 7. Bulk Create Users (if not existing already)
+8. Ensure user VNet
+9. Ensure all user VNets
 Q. Quit"""
         )
         c = input("> ")
@@ -86,7 +241,7 @@ Q. Quit"""
             manager.create_user(
                 input("Username: "), getpass.getpass("Password: "), "pve"
             )
-        elif c == "7":
+        elif c == "7": # TODO: this is all @pve still
             fn = input("Filename CSV of users: ")
             newpw = getpass.getpass(
                 "Default password for any users we need to create: "
@@ -101,9 +256,17 @@ Q. Quit"""
                     group = "Proxmox_Users" if row[1] == "user" else "Proxmox_Admins"
                     if not manager.check_if_user(username + "@pve"):  # doesn't exist
                         manager.create_user(username, newpw, "pve")
-                        manager.set_user_group(username + "@pve", group)
-                        print(f"Created {username}@pve with group {group}")
+                        #manager.set_user_group(username + "@pve", group)
+                        print(f"Created {username}@pve")
                     else:
                         print(f"{username} exists. Might have to manually check group?")
+        elif c == "8":
+            manager.ensure_user_vnet(input("Username: "))
+        elif c == "9":
+            users = manager.get_users()
+            for user in users:
+                if user['userid'].endswith("@pve"):
+                    username = user['userid'].split('@')[0]
+                    manager.ensure_user_vnet(username)
         else:
             running = False
