@@ -1,4 +1,3 @@
-
 import requests
 import json
 import time
@@ -195,10 +194,10 @@ if __name__ == "__main__":
         manager.read_vm_data()
         print(
             """1. Create range VMs for user
-2. Destroy single VM
-3. Destroy multiple VMs
-4. Destroy ALL range VMs
-5. Create range VMs for multiple users
+2. Create range VMs for multiple users
+3. Destroy single VM
+4. Destroy multiple VMs
+5. Destroy ALL range VMs
 6. Create new user
 7. Bulk Create Users (if not existing already)
 8. Ensure user VNet
@@ -216,7 +215,7 @@ Q. Quit"""
                 for vid in stuff:
                     tgt.append(int(vid))
             manager.create_range(tgt, input("Username: "))
-        elif c == "5":
+        elif c == "2":
             vmids = input("Comma seperated list of VMIDs (or just one): ")
             tgt = []
             if not "," in vmids:
@@ -234,13 +233,13 @@ Q. Quit"""
                     manager.create_range(tgt, user[0]+"@pve")
                 else:
                     print("Skipping " + str(user[0]))
-        elif c == "2":
-            manager.destroy_vm(int(input("VMID to destroy (NO CONFIRMATION): ")))
         elif c == "3":
+            manager.destroy_vm(int(input("VMID to destroy (NO CONFIRMATION): ")))
+        elif c == "4":
             kaboom = input("Comma-seperated list to remove (NO CONFIRMATION): ")
             for id in kaboom.split(","):
                 manager.destroy_vm(int(id))
-        elif c ==.         elif c == "4":
+        elif c == "5":
             manager.destroy_range()
         elif c == "6":
             manager.create_user(
