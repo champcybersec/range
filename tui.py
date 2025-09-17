@@ -158,10 +158,14 @@ class ProxmoxManager:
  
             zone_name = "CMPCCDC"
             if '.' in username:
+                print("Split: " + username)
                 tb = username.split('.')
             else:
+                print("Did not split " + username)
                 tb = ['N', username[0]]
+
             vnet_name = f"RN{tb[0]}{tb[1]}"
+            
             with open(".vnet","a+") as f:
                 f.write(vnet_name+"\n")
 
