@@ -1,11 +1,23 @@
+<h3>For 9/23/25:</h3>
+<p>Clone either of the base templates, make some scripts, then you can clone old template(s) from week 2 or 3 to test them on.</p>
 <form method="POST">
     <label for="username">Username (without realm):</label>
     <input type="text" id="username" name="username" required />
+    <br/><br/>
+
     <label for="vmid">Template to clone:</label>
     <select id="vmid" name="vmid" required>
+        <option value="210">Linux - Threat Hunting wk1</option>
+        <option value="117">Windows - Threat Hunting wk1</option>
         <option value="129">Linux - Inject Night</option>
         <option value="130">Windows - Inject Night</option>
+        <option value="106">Windows 10 Base - Scripting Night</option>
+        <option value="151">Xubuntu 22.04 Base - Scripting Night</option>
+        <option value="145">FreeBSD Nginx Bonus - Scripting Night?</option>
     </select>
-    <button type="submit">Clone and Grant Admin</button>
+
+    <br/>
+    <br/>
+    <button type="submit">Clone to range</button>
 </form>
 

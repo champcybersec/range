@@ -24,6 +24,13 @@ AUTHK = "yup"
 
 DEFAULT_USER_PASSWORD = secrets.get("web", {}).get("default_user_password", "ChangeMe123!")
 
+def get_vnet_for_user(proxmox, username):
+    vnets = proxmox.cluster.sdn.vnets.get()
+    for vnet in vnets:
+        if vnet.get("alias") == username:
+            return vnet.get("vnet")
+    return None
+
 
 def get_proxmox() -> ProxmoxAPI:
     return ProxmoxAPI(
@@ -88,7 +95,7 @@ def ensure():
 
         usernames = data["usernames"].split(",")
 
-        for username in usernames:
+        for username in usernames: # TODO: do we need this now that AD?
             uid = username + "@pve"
             # Create a PVE local user if missing (migration helper)
             prox = get_proxmox()
@@ -195,12 +202,18 @@ def clone_page():
         new_vmid = prox.cluster.nextid.get()
         prox.nodes(PROXMOX_NODE).qemu(vmid).clone.post(
             newid=new_vmid,
-            name=f"{username}-clone-{vmid}",
+            name=f"{username}-range-wk4-{vmid}",
             full=0,
             target=PROXMOX_NODE,
+            pool=f"{username}-range"
         )
+        
+        net0 = f"e1000,bridge={get_vnet_for_user(prox, username)}"
+        prox.nodes(PROXMOX_NODE).qemu(new_vmid).config.post(net0=net0)
+        
         # Grant Administrator role to username@ad on this VM
-        prox.access.acl.put(path=f"/vms/{new_vmid}", users=f"{username}@ad", roles="Administrator")
+        prox.access.acl.put(path=f"/vms/{new_vmid}", users=f"{username}@ad", roles="PVEAdmin,Administrator")
+
         return render_template("page.html", content=f"<h2>Cloned VMID {vmid} to {new_vmid} and granted Administrator to {username}@ad</h2><p>Next, log into Proxmox at <a href='https://192.168.3.236:8006' target='_blank' rel='noopener'>https://192.168.3.236:8006</a></p>")
     except Exception as e:
         return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
@@ -228,4 +241,4 @@ def uhoh_yikes(e):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7878)
+    app.run(host="0.0.0.0", port=7878, debug=True)
