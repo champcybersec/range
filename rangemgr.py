@@ -340,29 +340,31 @@ class UserManager:
     def validate_ad_user(self, username: str) -> bool:
         """
         Validate that a user exists in the AD realm.
-        
+
         Args:
             username: Username (without realm)
-            
+
         Returns:
             True if user exists in AD realm, False otherwise
         """
         userid = f"{username}@ad"
         return self.user_exists(userid)
-    
+
     def get_ad_user_error_message(self, username: str) -> str:
         """
         Get a helpful error message for when an AD user doesn't exist.
-        
+
         Args:
             username: Username (without realm)
-            
+
         Returns:
             Error message instructing to contact admin
         """
-        return (f"User '{username}@ad' does not exist. "
-                f"Please contact an administrator to create the account "
-                f"'{username}' on the domain controller.")
+        return (
+            f"User '{username}@ad' does not exist. "
+            f"Please contact an administrator to create the account "
+            f"'{username}' on the domain controller."
+        )
 
     def delete_user(self, userid: str) -> bool:
         """
@@ -654,7 +656,7 @@ class RangeManager:
             if not self.users.validate_ad_user(username):
                 logger.error(self.users.get_ad_user_error_message(username))
                 return False
-            
+
             pool_name = f"{username}{pool_suffix}"
 
             # Ensure pool exists
