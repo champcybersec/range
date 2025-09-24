@@ -21,6 +21,7 @@ import re
 import time
 import tomli
 import urllib.parse
+import requests
 from typing import Dict, List, Any, Optional
 from proxmoxer import ProxmoxAPI
 import logging
@@ -475,8 +476,9 @@ class UserManager:
 class NetworkManager:
     """Handles network and VNet operations."""
 
-    def __init__(self, proxmox: ProxmoxAPI):
+    def __init__(self, proxmox: ProxmoxAPI, secrets: Optional[Dict[str, Any]] = None):
         self.proxmox = proxmox
+        self.secrets = secrets or load_secrets()
 
     def get_vnets(self) -> List[Dict[str, Any]]:
         """Get list of all VNets."""
@@ -556,6 +558,11 @@ class NetworkManager:
     ) -> Optional[str]:
         """
         Ensure a VNet exists for a user.
+        
+        This method follows the new strategy:
+        1. First check if user already has a VNet assigned
+        2. Look for an unassigned VNet (no alias) and assign it
+        3. Only create a new VNet if no unassigned ones are available
 
         Args:
             username: Username to create VNet for
@@ -586,6 +593,42 @@ class NetworkManager:
                     )
                     return existing_vnet_name
 
+            # Look for an unassigned VNet (one with no alias or empty alias)
+            unassigned_vnets = []
+            for vnet in vnets:
+                vnet_name = vnet.get("vnet", "")
+                alias = vnet.get("alias")
+                # Check if this VNet matches our naming pattern and has no alias
+                if vnet_name.startswith(vnet_prefix) and (not alias or alias.strip() == ""):
+                    # Extract number from VNet name to sort properly
+                    try:
+                        vnet_num = int(vnet_name[len(vnet_prefix):])
+                        unassigned_vnets.append((vnet_num, vnet_name))
+                    except ValueError:
+                        # Skip VNets that don't follow the expected naming pattern
+                        continue
+            
+            # Sort unassigned VNets by number and use the lowest available
+            if unassigned_vnets:
+                unassigned_vnets.sort()  # Sort by number (first element of tuple)
+                _, vnet_name = unassigned_vnets[0]  # Get the VNet name from the first tuple
+                
+                # Update the VNet to assign it to this user
+                try:
+                    # Delete and recreate the VNet with the new alias
+                    # This is the most reliable way to update the alias in Proxmox
+                    if self.delete_vnet(vnet_name):
+                        if self.create_vnet(vnet_name, zone, username):
+                            logger.info(f"Assigned existing VNet '{vnet_name}' to user {username}")
+                            return vnet_name
+                        else:
+                            logger.error(f"Failed to recreate VNet {vnet_name} with user alias")
+                    else:
+                        logger.error(f"Failed to delete VNet {vnet_name} for reassignment")
+                except Exception as e:
+                    logger.error(f"Failed to assign VNet {vnet_name} to user {username}: {e}")
+
+            # If no unassigned VNets are available, create a new one
             # Generate a unique numeric VNet name RN# format (no zero padding)
             existing_vnet_names = {v.get("vnet", "") for v in vnets}
 
@@ -595,7 +638,7 @@ class NetworkManager:
                 if vnet_name not in existing_vnet_names:
                     # Create the new VNet with username in alias field
                     if self.create_vnet(vnet_name, zone, username):
-                        logger.info(f"Created VNet '{vnet_name}' for user {username}")
+                        logger.info(f"Created new VNet '{vnet_name}' for user {username}")
                         return vnet_name
                     else:
                         return None
@@ -609,13 +652,71 @@ class NetworkManager:
             return None
 
     def reload_sdn(self) -> bool:
-        """Reload SDN configuration."""
+        """Reload SDN configuration using raw requests API."""
         try:
-            self.proxmox.cluster.sdn.reload.post()
-            logger.info("Reloaded SDN configuration")
-            return True
+            # Get Proxmox connection details from secrets
+            proxmox_config = self.secrets["proxmox"]
+            host = proxmox_config["host"]
+            
+            # Ensure host doesn't have trailing paths
+            if host.endswith("/api2/json"):
+                host = host.replace("/api2/json", "")
+            if not host.startswith("http"):
+                host = f"https://{host}"
+            
+            # Get authentication ticket from proxmoxer connection
+            # This is a bit of a hack but proxmoxer doesn't expose the ticket easily
+            try:
+                # Try the standard proxmoxer API first
+                self.proxmox.cluster.sdn.reload.post()
+                logger.info("Reloaded SDN configuration using proxmoxer")
+                return True
+            except Exception as proxmoxer_error:
+                logger.warning(f"Proxmoxer SDN reload failed: {proxmoxer_error}, trying raw requests")
+                
+                # Fall back to raw requests
+                auth_url = f"{host}/api2/json/access/ticket"
+                auth_data = {
+                    "username": proxmox_config["user"],
+                    "password": proxmox_config["password"]
+                }
+                
+                verify_ssl = proxmox_config.get("verify_ssl", True)
+                
+                # Get authentication ticket
+                auth_response = requests.post(
+                    auth_url, 
+                    data=auth_data, 
+                    verify=verify_ssl,
+                    timeout=30
+                )
+                auth_response.raise_for_status()
+                auth_data = auth_response.json()["data"]
+                
+                # Prepare headers for authenticated request
+                headers = {
+                    "CSRFPreventionToken": auth_data["CSRFPreventionToken"]
+                }
+                cookies = {
+                    "PVEAuthCookie": auth_data["ticket"]
+                }
+                
+                # Make the SDN reload request
+                reload_url = f"{host}/api2/json/cluster/sdn/reload"
+                reload_response = requests.post(
+                    reload_url,
+                    headers=headers,
+                    cookies=cookies,
+                    verify=verify_ssl,
+                    timeout=30
+                )
+                reload_response.raise_for_status()
+                
+                logger.info("Reloaded SDN configuration using raw requests API")
+                return True
+                
         except Exception as e:
-            logger.error(f"Failed to reload SDN: {e}")
+            logger.error(f"Failed to reload SDN configuration: {e}")
             return False
 
 
@@ -700,7 +801,7 @@ class RangeManager:
         # Initialize component managers
         self.vms = VMManager(self.proxmox, self.node)
         self.users = UserManager(self.proxmox)
-        self.networks = NetworkManager(self.proxmox)
+        self.networks = NetworkManager(self.proxmox, secrets)
         self.pools = PoolManager(self.proxmox)
 
     def user_has_complete_range(

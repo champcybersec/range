@@ -24,7 +24,7 @@ import os
 from typing import List, Optional
 import logging
 
-from rangemgr import RangeManager, load_secrets
+from rangemgr import RangeManager, load_secrets, load_infra_config
 
 # Configure logging
 logging.basicConfig(
@@ -150,6 +150,23 @@ def setup_network_commands(subparsers):
     )
     ensure_all_parser.add_argument(
         "--zone", default="CMPCCDC", help="SDN zone (default: CMPCCDC)"
+    )
+
+    # Pre-create VNets
+    prep_parser = net_subparsers.add_parser(
+        "pre-prep", help="Pre-create VNets to avoid downtime"
+    )
+    prep_parser.add_argument(
+        "--start", type=int, default=1, help="Starting VNet number (default: 1)"
+    )
+    prep_parser.add_argument(
+        "--end", type=int, default=100, help="Ending VNet number (default: 100)"
+    )
+    prep_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be created without making changes"
+    )
+    prep_parser.add_argument(
+        "--no-reload", action="store_true", help="Skip SDN reload at the end"
     )
 
     # Reload SDN
@@ -348,6 +365,55 @@ def handle_network_commands(args, manager: RangeManager):
             print("Reloaded SDN configuration")
 
         print(f"Ensured VNets for {created_count} users")
+
+    elif args.net_command == "pre-prep":
+        # Load infrastructure configuration for VNet naming
+        infra_config = load_infra_config()
+        naming_config = infra_config.get("naming", {})
+        vnet_prefix = naming_config.get("vnet_prefix", "RN")
+        zone = naming_config.get("vnet_zone", "CMPCCDC")
+
+        # Get existing VNets to avoid duplicates
+        existing_vnets = manager.networks.get_vnets()
+        existing_vnet_names = {vnet.get("vnet", "") for vnet in existing_vnets}
+
+        created_count = 0
+        skipped_count = 0
+
+        print(f"{'DRY RUN: ' if args.dry_run else ''}Creating VNets {vnet_prefix}{args.start} to {vnet_prefix}{args.end} in zone {zone}")
+
+        for i in range(args.start, args.end + 1):
+            vnet_name = f"{vnet_prefix}{i}"
+
+            if vnet_name in existing_vnet_names:
+                print(f"VNet {vnet_name} already exists, skipping")
+                skipped_count += 1
+                continue
+
+            if args.dry_run:
+                print(f"DRY RUN: Would create VNet {vnet_name} in zone {zone}")
+                created_count += 1
+            else:
+                # Create VNet with no alias (empty string means unassigned)
+                if manager.networks.create_vnet(vnet_name, zone, alias=None):
+                    print(f"Created VNet {vnet_name}")
+                    created_count += 1
+                else:
+                    print(f"Failed to create VNet {vnet_name}")
+
+        print(f"Summary: {created_count} VNets created, {skipped_count} skipped")
+
+        # Reload SDN configuration unless disabled or dry run
+        if not args.no_reload and not args.dry_run and created_count > 0:
+            print("Reloading SDN configuration...")
+            if manager.networks.reload_sdn():
+                print("SDN configuration reloaded successfully")
+            else:
+                print("Failed to reload SDN configuration")
+        elif args.dry_run:
+            print("DRY RUN: Would reload SDN configuration")
+        elif created_count == 0:
+            print("No VNets created, skipping SDN reload")
 
     elif args.net_command == "reload":
         success = manager.networks.reload_sdn()
