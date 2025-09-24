@@ -89,6 +89,7 @@ def show_dev_info():
     
     print("\nAPI Endpoints:")
     print("  GET  /                - Home page")
+    print("  GET  /health          - Health check and system status")
     print("  GET  /clone           - VM cloning form")
     print("  POST /clone           - Create VM clone")
     print("  GET  /login           - Admin login")

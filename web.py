@@ -49,8 +49,15 @@ def load_secrets() -> Dict[str, Any]:
     with open(secrets_path, "rb") as f:
         return tomli.load(f)
 
-# Load configuration secrets
-secrets = load_secrets()
+try:
+    # Load configuration secrets  
+    secrets = load_secrets()
+except FileNotFoundError:
+    logger.error("Configuration file 'secrets.toml' not found. Copy secrets.toml.example and configure.")
+    raise
+except Exception as e:
+    logger.error(f"Failed to load configuration: {e}")
+    raise
 
 # Proxmox connection configuration
 PROXMOX_HOST = secrets["proxmox"]["host"]  # e.g. 192.168.3.236
@@ -78,11 +85,16 @@ def get_vnet_for_user(proxmox: ProxmoxAPI, username: str) -> Optional[str]:
     Returns:
         The vnet name if found, None otherwise
     """
-    vnets = proxmox.cluster.sdn.vnets.get()
-    for vnet in vnets:
-        if vnet.get("alias") == username:
-            return vnet.get("vnet")
-    return None
+    try:
+        vnets = proxmox.cluster.sdn.vnets.get()
+        for vnet in vnets:
+            if vnet.get("alias") == username:
+                return vnet.get("vnet")
+        logger.debug(f"No vnet found for user {username}")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get vnet for user {username}: {e}")
+        return None
 
 
 def get_proxmox() -> ProxmoxAPI:
@@ -91,14 +103,48 @@ def get_proxmox() -> ProxmoxAPI:
     
     Returns:
         Configured ProxmoxAPI client instance
+        
+    Raises:
+        Exception: If connection to Proxmox fails
     """
     logger.debug(f"Connecting to Proxmox at {PROXMOX_HOST} as {PROXMOX_USER}")
-    return ProxmoxAPI(
-        PROXMOX_HOST,
-        user=PROXMOX_USER,
-        password=PROXMOX_PASSWORD,
-        verify_ssl=PROXMOX_VERIFY_SSL,
-    )
+    try:
+        return ProxmoxAPI(
+            PROXMOX_HOST,
+            user=PROXMOX_USER,
+            password=PROXMOX_PASSWORD,
+            verify_ssl=PROXMOX_VERIFY_SSL,
+        )
+    except Exception as e:
+        logger.error(f"Failed to connect to Proxmox: {e}")
+        raise
+
+
+@app.route("/health")
+def health_check():
+    """
+    Health check endpoint for monitoring and load balancers.
+    
+    Returns:
+        JSON response with system status
+    """
+    try:
+        # Test basic Proxmox connectivity
+        prox = get_proxmox()
+        version = prox.version.get()
+        
+        return {
+            "status": "healthy",
+            "proxmox_connected": True,
+            "proxmox_version": version.get("version", "unknown")
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy", 
+            "proxmox_connected": False,
+            "error": str(e)
+        }, 503
 
 
 @app.route("/")
@@ -199,10 +245,15 @@ def ensure():
         for username in usernames:  # TODO: do we need this now that AD?
             uid = username + "@pve"
             # Create a PVE local user if missing (migration helper)
-            prox = get_proxmox()
-            users = prox.access.users.get()
-            if not any(u.get("userid") == uid for u in users):
-                prox.access.users.post(userid=uid, password=DEFAULT_USER_PASSWORD)
+            try:
+                prox = get_proxmox()
+                users = prox.access.users.get()
+                if not any(u.get("userid") == uid for u in users):
+                    prox.access.users.post(userid=uid, password=DEFAULT_USER_PASSWORD)
+                    logger.info(f"Created PVE user: {uid}")
+            except Exception as e:
+                logger.error(f"Failed to ensure user {uid}: {e}")
+                return f"Error ensuring user {uid}: {str(e)}", 500
 
         return "Wahoo"
 
@@ -361,6 +412,7 @@ def clone_page():
 
         return render_template("page.html", content=f"<h2>Cloned VMID {vmid} to {new_vmid} and granted Administrator to {username}@ad</h2><p>Next, log into Proxmox at <a href='https://192.168.3.236:8006' target='_blank' rel='noopener'>https://192.168.3.236:8006</a></p>")
     except Exception as e:
+        logger.error(f"Failed to clone VM {vmid} for user {username}: {e}")
         return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
 
 
