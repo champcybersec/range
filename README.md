@@ -115,8 +115,9 @@ manager.networks.reload_sdn()
 success = manager.setup_user_range("john.doe", base_vmid=150)
 ```
 
-#### Legacy Scripts
-Individual scripts are available in the `scripts/` directory but are largely superseded by the unified CLI.
+#### PowerShell Scripts
+The `scripts/` directory contains PowerShell utilities for Active Directory operations:
+- `Create-RangeUsers.ps1`: Bulk user creation and group assignment in Active Directory
 
 The web interface will be available at `http://localhost:7878`
 
@@ -190,13 +191,11 @@ Modern CLI tool that replaces individual scripts with unified commands:
 - `network`: Network operations (VNet management, SDN reload)
 - `range`: High-level setup operations
 
-#### Legacy Scripts Directory
-The `scripts/` directory contains the original individual scripts:
-- User cleanup (`cleanup_pve_user.py`, `purge_pve_users.py`)
-- Range setup (`setup_range.py`)
-- VM management (`nuke_*.py`, `set_power_by_name.py`)
+#### PowerShell Scripts Directory
+The `scripts/` directory contains PowerShell utilities for Active Directory operations:
+- `Create-RangeUsers.ps1`: Bulk user creation and group assignment in Active Directory
 
-These are maintained for compatibility but the unified CLI is recommended for new workflows.
+All individual Python scripts have been consolidated into the unified `range_cli.py` command-line interface.
 
 ## License
 
