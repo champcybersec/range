@@ -13,6 +13,9 @@ A Python Flask web interface for managing Proxmox VMs in competitive cyber train
 ## Architecture
 
 - **Flask Web Application** (`web.py`): Main interface with multiple endpoints
+- **Range Management Library** (`rangemgr.py`): Unified API for Proxmox operations
+- **Command Line Interface** (`range_cli.py`): CLI tool for administrative tasks
+- **TUI Application** (`tui.py`): Interactive menu-driven interface
 - **Proxmox API Integration**: Using `proxmoxer` library for cluster management
 - **User Authentication**: Supports both AD realm and local PVE users
 - **Configuration Management**: TOML-based configuration files
@@ -48,6 +51,72 @@ cp secrets.toml.example secrets.toml
 ```bash
 python web.py
 ```
+
+### Command Line Tools
+
+The system provides several command-line tools for administrative tasks:
+
+#### Range CLI (`range_cli.py`)
+Unified command-line interface for all range management operations:
+
+```bash
+# VM Management
+python range_cli.py vm list --pattern ".*range.*"
+python range_cli.py vm power start ".*windows.*"
+python range_cli.py vm nuke ".*test.*" --dry-run
+python range_cli.py vm nuke-gw  # Delete all gateway VMs
+
+# User Management  
+python range_cli.py user list --realm ad
+python range_cli.py user create testuser password123 --realm pve
+python range_cli.py user purge-pve --dry-run
+
+# Network Management
+python range_cli.py network list
+python range_cli.py network ensure-user john.doe
+python range_cli.py network ensure-all  # Create VNets for all AD users
+
+# High-level Range Operations
+python range_cli.py range setup john.doe --base-vmid 150
+python range_cli.py range setup-all --skip-admins
+```
+
+#### Interactive TUI (`tui.py`)
+Menu-driven interface for common operations:
+```bash
+python tui.py
+```
+
+### Using the rangemgr Library
+
+The `rangemgr.py` module can be imported and used in custom scripts:
+
+```python
+from rangemgr import RangeManager, load_secrets
+
+# Initialize the manager
+secrets = load_secrets()
+manager = RangeManager(secrets)
+
+# VM operations
+vms = manager.vms.get_vms()
+manager.vms.nuke_by_pattern(r'.*test.*')
+manager.vms.set_power_by_pattern(r'.*windows.*', 'start')
+
+# User operations  
+users = manager.users.get_users("ad")
+manager.users.create_user("testuser", "password", "pve")
+
+# Network operations
+vnet_name = manager.networks.ensure_user_vnet("john.doe")
+manager.networks.reload_sdn()
+
+# High-level range setup
+success = manager.setup_user_range("john.doe", base_vmid=150)
+```
+
+#### Legacy Scripts
+Individual scripts are available in the `scripts/` directory but are largely superseded by the unified CLI.
 
 The web interface will be available at `http://localhost:7878`
 
@@ -106,10 +175,30 @@ flake8 .
 
 ### Scripts
 
-The `scripts/` directory contains utility scripts for:
-- User cleanup (`cleanup_pve_user.py`)
+The repository provides three main interfaces:
+
+#### rangemgr.py - Core Library
+Unified Python library with the following components:
+- `RangeManager`: High-level operations for complete range setup
+- `VMManager`: VM lifecycle operations (clone, delete, power control)
+- `UserManager`: User creation, deletion, and management
+- `NetworkManager`: VNet creation and SDN management
+- `PoolManager`: Proxmox pool operations
+
+#### range_cli.py - Command Line Interface
+Modern CLI tool that replaces individual scripts with unified commands:
+- `vm`: VM management (list, power, nuke, clone)
+- `user`: User management (list, create, delete, bulk operations)
+- `network`: Network operations (VNet management, SDN reload)
+- `range`: High-level setup operations
+
+#### Legacy Scripts Directory
+The `scripts/` directory contains the original individual scripts:
+- User cleanup (`cleanup_pve_user.py`, `purge_pve_users.py`)
 - Range setup (`setup_range.py`)
 - VM management (`nuke_*.py`, `set_power_by_name.py`)
+
+These are maintained for compatibility but the unified CLI is recommended for new workflows.
 
 ## License
 

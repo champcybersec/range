@@ -18,6 +18,7 @@ import random
 import tomli
 import logging
 from typing import Dict, Any, Optional
+from rangemgr import RangeManager, load_secrets, get_proxmox_client
 
 # Configure logging for development and debugging
 logging.basicConfig(
@@ -33,25 +34,13 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 
-def load_secrets() -> Dict[str, Any]:
-    """
-    Load configuration secrets from secrets.toml file.
-    
-    Returns:
-        Dict containing configuration sections for proxmox, web, etc.
-        
-    Raises:
-        FileNotFoundError: If secrets.toml file is not found
-        tomli.TOMLDecodeError: If the TOML file is malformed
-    """
-    secrets_path = os.path.join(os.path.dirname(__file__), "secrets.toml")
-    logger.info(f"Loading secrets from {secrets_path}")
-    with open(secrets_path, "rb") as f:
-        return tomli.load(f)
+# Load secrets using the unified function from rangemgr
+logger.info("Loading configuration using rangemgr")
 
 try:
-    # Load configuration secrets  
+    # Load configuration secrets using rangemgr
     secrets = load_secrets()
+    range_manager = RangeManager(secrets)
 except FileNotFoundError:
     logger.error("Configuration file 'secrets.toml' not found. Copy secrets.toml.example and configure.")
     raise
@@ -78,28 +67,23 @@ def get_vnet_for_user(proxmox: ProxmoxAPI, username: str) -> Optional[str]:
     """
     Get the virtual network (vnet) assigned to a specific user.
     
+    Uses the rangemgr NetworkManager for consistency.
+    
     Args:
-        proxmox: Authenticated ProxmoxAPI client
+        proxmox: Authenticated ProxmoxAPI client (kept for compatibility)
         username: Username to look up network for
         
     Returns:
         The vnet name if found, None otherwise
     """
-    try:
-        vnets = proxmox.cluster.sdn.vnets.get()
-        for vnet in vnets:
-            if vnet.get("alias") == username:
-                return vnet.get("vnet")
-        logger.debug(f"No vnet found for user {username}")
-        return None
-    except Exception as e:
-        logger.error(f"Failed to get vnet for user {username}: {e}")
-        return None
+    return range_manager.networks.get_vnet_for_user(username)
 
 
 def get_proxmox() -> ProxmoxAPI:
     """
     Create and return an authenticated ProxmoxAPI client.
+    
+    Uses the rangemgr get_proxmox_client function for consistency.
     
     Returns:
         Configured ProxmoxAPI client instance
@@ -107,17 +91,7 @@ def get_proxmox() -> ProxmoxAPI:
     Raises:
         Exception: If connection to Proxmox fails
     """
-    logger.debug(f"Connecting to Proxmox at {PROXMOX_HOST} as {PROXMOX_USER}")
-    try:
-        return ProxmoxAPI(
-            PROXMOX_HOST,
-            user=PROXMOX_USER,
-            password=PROXMOX_PASSWORD,
-            verify_ssl=PROXMOX_VERIFY_SSL,
-        )
-    except Exception as e:
-        logger.error(f"Failed to connect to Proxmox: {e}")
-        raise
+    return get_proxmox_client(secrets)
 
 
 @app.route("/health")
