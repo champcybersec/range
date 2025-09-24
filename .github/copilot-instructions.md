@@ -209,10 +209,24 @@ The system includes several validation mechanisms:
 
 When contributing to this project:
 1. Follow existing code style (Black formatting, type hints, docstrings)
-2. Ensure all Python files compile without syntax errors
-3. Test changes with both web interface and CLI tools
-4. Update documentation for new features or significant changes
-5. Use descriptive commit messages and maintain clean git history
+2. **Always run black linter before pushing to any pull request**: `black .`
+3. Ensure all Python files compile without syntax errors
+4. Test changes with both web interface and CLI tools
+5. Update documentation for new features or significant changes
+6. Use descriptive commit messages and maintain clean git history
+
+### Pre-commit Requirements
+Before pushing any changes to a pull request in process:
+```bash
+# Format code with black
+black .
+
+# Verify formatting compliance
+black --check .
+
+# Check syntax
+python -m py_compile *.py
+```
 
 ## License
 

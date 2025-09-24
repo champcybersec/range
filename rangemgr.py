@@ -586,12 +586,12 @@ class NetworkManager:
                     )
                     return existing_vnet_name
 
-            # Generate a unique numeric VNet name RN#### format
+            # Generate a unique numeric VNet name RN# format (no zero padding)
             existing_vnet_names = {v.get("vnet", "") for v in vnets}
 
-            # Find the next available number starting from 0001
-            for i in range(1, 10000):  # Support up to 9999 users
-                vnet_name = f"{vnet_prefix}{i:04d}"
+            # Find the next available number starting from 37 to avoid conflicts with existing RN1-RN36
+            for i in range(37, 1000000):  # Support up to 999999 users as requested
+                vnet_name = f"{vnet_prefix}{i}"
                 if vnet_name not in existing_vnet_names:
                     # Create the new VNet with username in alias field
                     if self.create_vnet(vnet_name, zone, username):
