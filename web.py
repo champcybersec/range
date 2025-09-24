@@ -199,37 +199,42 @@ def adm():
 @app.route("/ensure", methods=["POST"])
 def ensure():
     """
-    Ensure PVE local users exist for given usernames.
+    Validate that AD realm users exist for given usernames.
     
-    Legacy endpoint for user management before full AD integration.
-    Creates @pve realm users if they don't exist.
+    Updated endpoint that validates users exist in AD realm instead of creating PVE users.
     
     Expects JSON payload: {"usernames": "user1,user2,..."}
     
     Returns:
-        Success message or redirect to login if not authenticated
+        Success message, error list, or redirect to login if not authenticated
     """
     if request.cookies.get("sk-lol") != AUTHK:
         return redirect("/login")
     else:
         data = request.get_json()
-
         usernames = data["usernames"].split(",")
-
-        for username in usernames:  # TODO: do we need this now that AD?
-            uid = username + "@pve"
-            # Create a PVE local user if missing (migration helper)
-            try:
-                prox = get_proxmox()
-                users = prox.access.users.get()
-                if not any(u.get("userid") == uid for u in users):
-                    prox.access.users.post(userid=uid, password=DEFAULT_USER_PASSWORD)
-                    logger.info(f"Created PVE user: {uid}")
-            except Exception as e:
-                logger.error(f"Failed to ensure user {uid}: {e}")
-                return f"Error ensuring user {uid}: {str(e)}", 500
-
-        return "Wahoo"
+        
+        # Load range manager for user validation
+        from rangemgr import RangeManager, load_secrets
+        secrets = load_secrets()
+        range_manager = RangeManager(secrets)
+        
+        missing_users = []
+        valid_users = []
+        
+        for username in usernames:
+            username = username.strip()
+            if range_manager.users.validate_ad_user(username):
+                valid_users.append(username)
+            else:
+                missing_users.append(username)
+        
+        if missing_users:
+            error_msg = f"The following users do not exist in AD realm: {', '.join(missing_users)}. "
+            error_msg += "Please contact an administrator to create these accounts on the domain controller."
+            return error_msg, 400
+        
+        return f"All users validated in AD realm: {', '.join(valid_users)}"
 
 
 @app.route("/range", methods=["POST"])
@@ -239,6 +244,7 @@ def mrange():
     
     Admin-only endpoint that clones specified VM templates for multiple users.
     Each user gets their own copy of each specified VM template.
+    All users must exist in AD realm.
     
     Expects JSON payload: {
         "vmids": "101,102,103",  # Comma-separated VM template IDs
@@ -252,11 +258,27 @@ def mrange():
         return redirect("/login")
 
     vmids = [int(vm_id) for vm_id in request.get_json()["vmids"].split(",")]
-    users = request.get_json()["usernames"].split(",")
+    users = [u.strip() for u in request.get_json()["usernames"].split(",")]
 
     logger.info(f"Bulk cloning VMs {vmids} for users {users}")
     print("Cloning VMs: ", vmids)
     print("For Users: ", users)
+    
+    # Load range manager for user validation
+    from rangemgr import RangeManager, load_secrets
+    secrets = load_secrets()
+    range_manager = RangeManager(secrets)
+    
+    # Validate all users exist in AD realm
+    missing_users = []
+    for user in users:
+        if not range_manager.users.validate_ad_user(user):
+            missing_users.append(user)
+    
+    if missing_users:
+        error_msg = f"The following users do not exist in AD realm: {', '.join(missing_users)}. "
+        error_msg += "Please contact an administrator to create these accounts on the domain controller."
+        return error_msg, 400
 
     try:
         prox = get_proxmox()
@@ -271,8 +293,8 @@ def mrange():
                     full=0,
                     target=PROXMOX_NODE,
                 )
-                # Assign Administrator to user@pve (legacy path)
-                prox.access.acl.put(path=f"/vms/{new_vmid}", users=f"{user}@pve", roles="Administrator")
+                # Assign Administrator to user@ad
+                prox.access.acl.put(path=f"/vms/{new_vmid}", users=f"{user}@ad", roles="Administrator")
         return "Wahoo"
     except Exception as e:
         return str(e)
@@ -281,66 +303,21 @@ def mrange():
 @app.route("/selfserve", methods=["GET", "POST"])
 def selfserve():
     """
-    Self-service VM creation page for authenticated users.
+    DEPRECATED: Self-service VM creation page.
     
-    GET: Display self-service form
-    POST: Authenticate user and create VM based on selection
-    
-    Legacy endpoint - users can authenticate with their PVE credentials
-    and create their own VMs from predefined templates.
+    This endpoint has been deprecated as it relied on PVE realm authentication.
+    Users should now use the main clone interface with AD authentication.
     
     Returns:
-        GET: Self-service form page
-        POST: Success page or error message
+        Deprecation notice
     """
-    if request.method == "GET":
-        if "flash" in request.cookies:
-            flash = request.cookies.get("flash")
-            pc = render_template("selfserve.html")
-            resp = make_response(render_template("page.html", content=pc, flash=flash))
-            resp.set_cookie("flash", "", expires=0)
-            return resp
-        else:
-            return render_template("page.html", content=render_template("selfserve.html"))
-    else:
-        user = request.form.get("username")
-        password = request.form.get("password")
-
-        # Basic auth check using PVE user (optional legacy support)
-        try:
-            ProxmoxAPI(
-                PROXMOX_HOST,
-                user=f"{user}@pve",
-                password=password,
-                verify_ssl=PROXMOX_VERIFY_SSL,
-            )
-            valid = True
-        except Exception:
-            valid = False
-        if valid:
-            os = request.form.get("os")
-            if os == "win":
-                vmid = 2001
-            else:
-                vmid = 2000
-
-            try:
-                prox = get_proxmox()
-                nvmid = prox.cluster.nextid.get()
-                prox.nodes(PROXMOX_NODE).qemu(vmid).clone.post(
-                    newid=nvmid,
-                    name=f"{user}-{os}-self",
-                    full=0,
-                    target=PROXMOX_NODE,
-                )
-                prox.access.acl.put(path=f"/vms/{nvmid}", users=f"{user}@pve", roles="Administrator")
-                return render_template("page.html", content=f"<h2>VM Created: {nvmid}</h2>")
-            except Exception as e:
-                return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
-        else:
-            resp = make_response(redirect("/selfserve"))
-            resp.set_cookie("flash", "Incorrect Password")
-            return resp
+    return render_template("page.html", content="""
+        <h2>Service Discontinued</h2>
+        <p>The self-service VM creation feature has been discontinued.</p>
+        <p>All user operations now require AD realm authentication.</p>
+        <p>Please contact an administrator to create your account on the domain controller.</p>
+        <p>You can then use the main <a href="/clone">VM cloning interface</a>.</p>
+    """)
 
 
 @app.route("/clone", methods=["GET", "POST"])
@@ -365,7 +342,17 @@ def clone_page():
     if not username or not vmid:
         return render_template("page.html", content="<h2>Username and VMID required</h2>"), 400
     
-    logger.info(f"Cloning VM {vmid} for user {username}")
+    # Load range manager for user validation
+    from rangemgr import RangeManager, load_secrets
+    secrets = load_secrets()
+    range_manager = RangeManager(secrets)
+    
+    # Validate user exists in AD realm
+    if not range_manager.users.validate_ad_user(username):
+        error_msg = range_manager.users.get_ad_user_error_message(username)
+        return render_template("page.html", content=f"<h2>User Validation Error</h2><p>{error_msg}</p>"), 400
+    
+    logger.info(f"Cloning VM {vmid} for user {username}@ad")
     try:
         prox = get_proxmox()
         new_vmid = prox.cluster.nextid.get()

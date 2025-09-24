@@ -28,10 +28,15 @@ function ensureUsers() {
             // Request was successful
             console.log(xhr.responseText);
             document.getElementById('usernames').value = '';
-            alert('Users should now all exist');
+            alert('All users validated in AD realm: ' + xhr.responseText);
+        } else if (xhr.status === 400) {
+            // Validation failed
+            console.error('Validation Error:', xhr.responseText);
+            alert('User validation failed: ' + xhr.responseText);
         } else {
-            // Request failed
+            // Other error
             console.error('Error:', xhr.status);
+            alert('An error occurred during validation');
         }
     };
 
