@@ -239,11 +239,16 @@ def handle_network_commands(args, manager: RangeManager):
             print("Failed to delete VNet")
     
     elif args.net_command == 'ensure-user':
+        # Validate user exists in AD realm
+        if not manager.users.validate_ad_user(args.username):
+            print(manager.users.get_ad_user_error_message(args.username))
+            return
+            
         vnet_name = manager.networks.ensure_user_vnet(args.username, args.zone)
         if vnet_name:
-            print(f"VNet {vnet_name} ensured for user {args.username}")
+            print(f"VNet {vnet_name} ensured for user {args.username}@ad")
         else:
-            print(f"Failed to ensure VNet for user {args.username}")
+            print(f"Failed to ensure VNet for user {args.username}@ad")
     
     elif args.net_command == 'ensure-all':
         # Sync AD realm first

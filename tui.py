@@ -17,9 +17,6 @@ if __name__ == "__main__":
     # Load configuration and create manager
     secrets = load_secrets()
     range_manager = RangeManager(secrets)
-    
-    # Get configuration values  
-    DEFAULT_USER_PASSWORD = secrets.get("web", {}).get("default_user_password", "ChangeMe123!")
 
     running = True
 

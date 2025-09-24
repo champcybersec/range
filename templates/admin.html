@@ -9,11 +9,12 @@
         <h4>Logged in as: {{ prox_login }}</h4>
         <a href="/logout">Logout</a>
         <hr/>
-        <h2>Ensure Users</h2>
+        <h2>Validate AD Users</h2>
+        <p><small>Validates that users exist in the AD realm before creating ranges.</small></p>
         <form onsubmit="return false;">
             <label for="usernames">Enter comma-separated list of usernames:</label>
             <input type="text" id="usernames">
-            <button type="button" onclick="ensureUsers();">Submit</button>
+            <button type="button" onclick="ensureUsers();">Validate</button>
         </form>
         <h2>Create Range</h2>
         <form onsubmit="return false;">

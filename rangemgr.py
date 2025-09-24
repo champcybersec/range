@@ -635,6 +635,7 @@ class RangeManager:
         Set up a complete range environment for a user.
 
         This includes:
+        - Validating user exists in AD realm
         - Creating a dedicated pool
         - Setting up a VNet
         - Cloning a gateway VM
@@ -649,6 +650,11 @@ class RangeManager:
             True if successful, False otherwise
         """
         try:
+            # Validate user exists in AD realm first
+            if not self.users.validate_ad_user(username):
+                logger.error(self.users.get_ad_user_error_message(username))
+                return False
+            
             pool_name = f"{username}{pool_suffix}"
 
             # Ensure pool exists
@@ -675,7 +681,7 @@ class RangeManager:
             # Set user permissions
             self._set_user_permissions(f"{username}@ad", pool_name, new_vmid)
 
-            logger.info(f"Successfully set up range for {username}")
+            logger.info(f"Successfully set up range for {username}@ad")
             return True
 
         except Exception as e:
