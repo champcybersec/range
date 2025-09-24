@@ -15,14 +15,16 @@ def check_secrets_file() -> bool:
     """Check if secrets.toml exists and provide setup guidance."""
     secrets_path = "secrets.toml"
     example_path = "secrets.toml.example"
-    
+
     if os.path.exists(secrets_path):
         print("✓ Configuration file 'secrets.toml' found")
         return True
     else:
         print("✗ Configuration file 'secrets.toml' not found")
         if os.path.exists(example_path):
-            print(f"  → Copy {example_path} to {secrets_path} and update with your values")
+            print(
+                f"  → Copy {example_path} to {secrets_path} and update with your values"
+            )
         else:
             print("  → Create secrets.toml with your Proxmox configuration")
         return False
@@ -30,9 +32,9 @@ def check_secrets_file() -> bool:
 
 def check_dependencies() -> bool:
     """Check if required dependencies are installed."""
-    required_packages = ['flask', 'proxmoxer', 'tomli', 'requests']
+    required_packages = ["flask", "proxmoxer", "tomli", "requests"]
     missing_packages = []
-    
+
     for package in required_packages:
         try:
             __import__(package)
@@ -40,9 +42,11 @@ def check_dependencies() -> bool:
         except ImportError:
             print(f"✗ {package} is missing")
             missing_packages.append(package)
-    
+
     if missing_packages:
-        print(f"\nInstall missing packages with: pip install {' '.join(missing_packages)}")
+        print(
+            f"\nInstall missing packages with: pip install {' '.join(missing_packages)}"
+        )
         return False
     return True
 
@@ -50,10 +54,12 @@ def check_dependencies() -> bool:
 def run_syntax_check() -> bool:
     """Check Python syntax for all Python files."""
     import py_compile
-    
-    python_files = ['web.py', 'tui.py']
-    python_files.extend([f"scripts/{f}" for f in os.listdir('scripts') if f.endswith('.py')])
-    
+
+    python_files = ["web.py", "tui.py"]
+    python_files.extend(
+        [f"scripts/{f}" for f in os.listdir("scripts") if f.endswith(".py")]
+    )
+
     all_good = True
     for file_path in python_files:
         if os.path.exists(file_path):
@@ -65,28 +71,28 @@ def run_syntax_check() -> bool:
                 all_good = False
         else:
             print(f"⚠ {file_path} not found")
-    
+
     return all_good
 
 
 def show_dev_info():
     """Show development information and tips."""
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("Proxmox Range Management - Development Info")
-    print("="*50)
-    
+    print("=" * 50)
+
     print("\nKey Files:")
     print("  web.py          - Main Flask application")
     print("  tui.py          - Text-based user interface")
     print("  scripts/        - Utility scripts for Proxmox management")
     print("  templates/      - HTML templates for web interface")
     print("  secrets.toml    - Configuration file (not in git)")
-    
+
     print("\nDevelopment Commands:")
     print("  python web.py              - Start web server (localhost:7878)")
     print("  python dev.py check        - Run development checks")
     print("  python -m py_compile *.py  - Check syntax")
-    
+
     print("\nAPI Endpoints:")
     print("  GET  /                - Home page")
     print("  GET  /health          - Health check and system status")
@@ -102,16 +108,16 @@ def main():
     """Main development script entry point."""
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         print("Running development environment checks...\n")
-        
+
         deps_ok = check_dependencies()
         secrets_ok = check_secrets_file()
         syntax_ok = run_syntax_check()
-        
+
         print(f"\nSummary:")
         print(f"  Dependencies: {'✓' if deps_ok else '✗'}")
-        print(f"  Configuration: {'✓' if secrets_ok else '✗'}")  
+        print(f"  Configuration: {'✓' if secrets_ok else '✗'}")
         print(f"  Syntax: {'✓' if syntax_ok else '✗'}")
-        
+
         if deps_ok and syntax_ok:
             print("\n✓ Ready for development!")
             if not secrets_ok:
