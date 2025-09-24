@@ -75,25 +75,17 @@ def setup_user_commands(subparsers):
     list_parser = user_subparsers.add_parser('list', help='List users')
     list_parser.add_argument('--realm', help='Filter by realm (ad, pve, etc.)')
     
-    # Create user
-    create_parser = user_subparsers.add_parser('create', help='Create a new user')
-    create_parser.add_argument('username', help='Username (without realm)')
-    create_parser.add_argument('password', help='User password')
-    create_parser.add_argument('--realm', default='pve', help='Authentication realm (default: pve)')
-    
     # Delete user
     delete_parser = user_subparsers.add_parser('delete', help='Delete a user')
-    delete_parser.add_argument('userid', help='Full user ID including realm (e.g., user@pve)')
+    delete_parser.add_argument('userid', help='Full user ID including realm (e.g., user@ad)')
     
     # Purge PVE users
     purge_parser = user_subparsers.add_parser('purge-pve', help='Delete all @pve realm users')
     purge_parser.add_argument('--dry-run', action='store_true', help='Show what would be deleted')
     
-    # Bulk create from CSV
-    bulk_parser = user_subparsers.add_parser('bulk-create', help='Create users from CSV file')
-    bulk_parser.add_argument('csv_file', help='Path to CSV file with usernames')
-    bulk_parser.add_argument('--password', help='Default password for all users')
-    bulk_parser.add_argument('--realm', default='pve', help='Authentication realm')
+    # Validate AD user
+    validate_parser = user_subparsers.add_parser('validate', help='Validate that a user exists in AD realm')
+    validate_parser.add_argument('username', help='Username (without realm) to validate')
 
 
 def setup_network_commands(subparsers):
@@ -202,13 +194,6 @@ def handle_user_commands(args, manager: RangeManager):
         for user in users:
             print(f"{user.get('userid', 'Unknown'):<30} {user.get('enable', 1):<8} {user.get('groups', '')}")
     
-    elif args.user_command == 'create':
-        success = manager.users.create_user(args.username, args.password, args.realm)
-        if success:
-            print(f"Successfully created user {args.username}@{args.realm}")
-        else:
-            print("Failed to create user")
-    
     elif args.user_command == 'delete':
         success = manager.users.delete_user(args.userid)
         if success:
@@ -223,33 +208,11 @@ def handle_user_commands(args, manager: RangeManager):
         else:
             print(f"Processed {count} @pve users")
     
-    elif args.user_command == 'bulk-create':
-        if not os.path.exists(args.csv_file):
-            print(f"Error: CSV file {args.csv_file} not found")
-            return
-        
-        password = args.password or input("Default password for all users: ")
-        created_count = 0
-        
-        with open(args.csv_file, 'r', newline='') as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if not row:
-                    continue
-                username = row[0].strip()
-                if not username:
-                    continue
-                
-                if not manager.users.user_exists(f"{username}@{args.realm}"):
-                    if manager.users.create_user(username, password, args.realm):
-                        print(f"Created {username}@{args.realm}")
-                        created_count += 1
-                    else:
-                        print(f"Failed to create {username}@{args.realm}")
-                else:
-                    print(f"User {username}@{args.realm} already exists")
-        
-        print(f"Created {created_count} new users")
+    elif args.user_command == 'validate':
+        if manager.users.validate_ad_user(args.username):
+            print(f"User {args.username}@ad exists")
+        else:
+            print(manager.users.get_ad_user_error_message(args.username))
 
 
 def handle_network_commands(args, manager: RangeManager):
@@ -374,7 +337,8 @@ Examples:
   %(prog)s vm list --pattern ".*range.*"
   %(prog)s vm power start ".*windows.*"
   %(prog)s vm nuke ".*test.*" --dry-run
-  %(prog)s user create testuser password123 --realm pve
+  %(prog)s user validate john.doe
+  %(prog)s user list --realm ad
   %(prog)s network ensure-all
   %(prog)s range setup john.doe --base-vmid 150
         """

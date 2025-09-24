@@ -31,10 +31,8 @@ if __name__ == "__main__":
 3. Destroy single VM
 4. Destroy multiple VMs
 5. Destroy ALL range VMs
-6. Create new user
-7. Bulk Create Users (if not existing already)
-8. Ensure user VNet
-9. Ensure all user VNets
+6. Ensure user VNet
+7. Ensure all user VNets
 Q. Quit"""
         )
         c = input("> ")
@@ -49,6 +47,12 @@ Q. Quit"""
                     tgt.append(int(vid))
             
             username = input("Username: ")
+            
+            # Validate user exists in AD realm
+            if not range_manager.users.validate_ad_user(username):
+                print(range_manager.users.get_ad_user_error_message(username))
+                continue
+            
             # Use the new range manager for VM creation
             for base_vmid in tgt:
                 new_vmid = range_manager.proxmox.cluster.nextid.get()
@@ -56,14 +60,14 @@ Q. Quit"""
                 
                 success = range_manager.vms.clone_vm(base_vmid, new_vmid, name)
                 if success:
-                    # Set permissions
+                    # Set permissions for AD user
                     try:
                         range_manager.proxmox.access.acl.put(
                             path=f"/vms/{new_vmid}",
-                            users=f"{username}@pve",
+                            users=f"{username}@ad",
                             roles="Administrator"
                         )
-                        print(f"Created VM {new_vmid} for {username}")
+                        print(f"Created VM {new_vmid} for {username}@ad")
                     except Exception as e:
                         print(f"Failed to set permissions: {e}")
                         
@@ -81,22 +85,28 @@ Q. Quit"""
 
             for user in users:
                 if user[1] != "admin":
-                    print("Making range for: " + str(user[0]) + "@pve")
-                    username = user[0] + "@pve"
+                    username = user[0]
+                    
+                    # Validate user exists in AD realm
+                    if not range_manager.users.validate_ad_user(username):
+                        print(f"Skipping {username}: {range_manager.users.get_ad_user_error_message(username)}")
+                        continue
+                        
+                    print("Making range for: " + str(username) + "@ad")
                     
                     for base_vmid in tgt:
                         new_vmid = range_manager.proxmox.cluster.nextid.get()
-                        name = f"{user[0]}-range-{base_vmid}"
+                        name = f"{username}-range-{base_vmid}"
                         
                         success = range_manager.vms.clone_vm(base_vmid, new_vmid, name)
                         if success:
                             try:
                                 range_manager.proxmox.access.acl.put(
                                     path=f"/vms/{new_vmid}",
-                                    users=username,
+                                    users=f"{username}@ad",
                                     roles="Administrator"
                                 )
-                                print(f"Created VM {new_vmid} for {username}")
+                                print(f"Created VM {new_vmid} for {username}@ad")
                             except Exception as e:
                                 print(f"Failed to set permissions: {e}")
                 else:
@@ -117,26 +127,6 @@ Q. Quit"""
             print(f"Destroyed {count} range VMs")
             
         elif c == "6":
-            username = input("Username: ")
-            password = input("Password: ")
-            range_manager.users.create_user(username, password, "pve")
-            
-        elif c == "7": # Bulk create users from CSV
-            fn = input("Filename CSV of users: ")
-            rows = load_csv(fn)
-            if rows is None:
-                print("No such file, or other error")
-                sys.exit(1)
-            else:
-                for index, row in enumerate(rows):
-                    username = row[0]
-                    if not range_manager.users.user_exists(username + "@pve"):  # doesn't exist
-                        range_manager.users.create_user(username, DEFAULT_USER_PASSWORD, "pve")
-                        print(f"Created {username}@pve")
-                    else:
-                        print(f"{username} exists. Might have to manually check group?")
-                        
-        elif c == "8":
             # Sync AD realm
             try:
                 range_manager.proxmox.access.domains("ad").sync.post()
@@ -145,15 +135,21 @@ Q. Quit"""
                 print(f"Warning: AD realm sync failed: {e}")
             
             username = input("Username: ")
+            
+            # Validate user exists in AD realm
+            if not range_manager.users.validate_ad_user(username):
+                print(range_manager.users.get_ad_user_error_message(username))
+                continue
+                
             vnet_name = range_manager.networks.ensure_user_vnet(username)
             if vnet_name:
-                print(f"Ensured VNet {vnet_name} for {username}")
+                print(f"Ensured VNet {vnet_name} for {username}@ad")
             else:
-                print(f"Failed to ensure VNet for {username}")
+                print(f"Failed to ensure VNet for {username}@ad")
                 
             range_manager.networks.reload_sdn()
             
-        elif c == "9":
+        elif c == "7":
             print("Checking VNet for all users")
             # Sync AD realm
             try:
@@ -171,5 +167,5 @@ Q. Quit"""
                     range_manager.networks.ensure_user_vnet(username)
                     
             range_manager.networks.reload_sdn()
-        else:
+        elif c.upper() == "Q":
             running = False
