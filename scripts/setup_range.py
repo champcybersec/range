@@ -1,29 +1,74 @@
+"""
+Proxmox Range Setup Script
+
+This script sets up range VMs for each user in the Proxmox environment.
+It clones a base gateway VM and assigns them to dedicated pools with
+proper network configurations for competitive cyber training scenarios.
+
+The script:
+1. Fetches all AD realm users from Proxmox
+2. Creates dedicated pools for each user  
+3. Clones gateway VMs with proper permissions
+4. Configures networking for isolated training environments
+"""
+
 import os
 import tomli
 from proxmoxer import ProxmoxAPI
+from typing import Dict, List, Any, Optional
 
-"""
-This script sets up range VMs for each user in the Proxmox environment.
-It clones a base gateway VM ~~and two workstation VMs (Xubuntu and Windows)~~
-(TODO: make it easy to reconfigure source VMID for workstation(s))
-for each user, assigns them to a dedicated pool, and configures their network settings.
-"""
 
-def load_secrets():
-    with open(os.path.join(os.path.dirname(__file__), "../secrets.toml"), "rb") as f:
+def load_secrets() -> Dict[str, Any]:
+    """
+    Load configuration secrets from secrets.toml file.
+    
+    Returns:
+        Dict containing configuration sections
+    """
+    secrets_path = os.path.join(os.path.dirname(__file__), "../secrets.toml")
+    with open(secrets_path, "rb") as f:
         return tomli.load(f)
 
-def get_users(proxmox):
+
+def get_users(proxmox: ProxmoxAPI) -> List[Dict[str, Any]]:
+    """
+    Get all users from the AD realm.
+    
+    Args:
+        proxmox: Authenticated ProxmoxAPI client
+        
+    Returns:
+        List of user dictionaries from AD realm
+    """
     return [u for u in proxmox.access.users.get() if u['userid'].endswith("@ad")]
 
-def get_vnet_for_user(proxmox, username):
+
+def get_vnet_for_user(proxmox: ProxmoxAPI, username: str) -> Optional[str]:
+    """
+    Get the virtual network (vnet) assigned to a specific user.
+    
+    Args:
+        proxmox: Authenticated ProxmoxAPI client
+        username: Username to look up network for
+        
+    Returns:
+        The vnet name if found, None otherwise
+    """
     vnets = proxmox.cluster.sdn.vnets.get()
     for vnet in vnets:
         if vnet.get("alias") == username:
             return vnet.get("vnet")
     return None
 
-def ensure_pool(proxmox, pool_name):
+
+def ensure_pool(proxmox: ProxmoxAPI, pool_name: str) -> None:
+    """
+    Create a pool if it doesn't exist.
+    
+    Args:
+        proxmox: Authenticated ProxmoxAPI client
+        pool_name: Name of the pool to create
+    """
     pools = proxmox.pools.get()
     if not any(p['poolid'] == pool_name for p in pools):
         proxmox.pools.post(poolid=pool_name, comment="Range pool for users")
