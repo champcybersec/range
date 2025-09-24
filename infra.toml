@@ -5,8 +5,8 @@
 # Pool naming: {username} + pool_suffix
 pool_suffix = "-range"
 
-# VNet naming: Generated as RNXX format where XX are initials from username
-# The alias field is set to the full username from AD
+# VNet naming: Generated as RN#### format where #### are 4-digit numbers (e.g., RN0001, RN0002)
+# The alias field is set to the full username from AD to map back to the user
 vnet_prefix = "RN"
 vnet_zone = "CMPCCDC"
 

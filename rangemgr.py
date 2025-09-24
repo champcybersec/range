@@ -574,26 +574,35 @@ class NetworkManager:
             else:
                 vnet_prefix = "RN"  # Default fallback
 
-            # Generate VNet name from username
-            if "." in username:
-                parts = username.split(".")
-            else:
-                parts = ["N", username[0]]
-
-            vnet_name = f"{vnet_prefix}{parts[0][0]}{parts[1][0]}"
-
-            # Check if VNet already exists
+            # Get existing VNets
             vnets = self.get_vnets()
-            vnet_exists = any(v.get("vnet") == vnet_name for v in vnets)
 
-            if not vnet_exists:
-                if self.create_vnet(vnet_name, zone, username):
-                    return vnet_name
-                else:
-                    return None
-            else:
-                logger.info(f"VNet '{vnet_name}' already exists for user {username}")
-                return vnet_name
+            # First check if a VNet already exists for this user (by checking alias field)
+            for vnet in vnets:
+                if vnet.get("alias") == username:
+                    existing_vnet_name = vnet.get("vnet")
+                    logger.info(
+                        f"VNet '{existing_vnet_name}' already exists for user {username}"
+                    )
+                    return existing_vnet_name
+
+            # Generate a unique numeric VNet name RN#### format
+            existing_vnet_names = {v.get("vnet", "") for v in vnets}
+
+            # Find the next available number starting from 0001
+            for i in range(1, 10000):  # Support up to 9999 users
+                vnet_name = f"{vnet_prefix}{i:04d}"
+                if vnet_name not in existing_vnet_names:
+                    # Create the new VNet with username in alias field
+                    if self.create_vnet(vnet_name, zone, username):
+                        logger.info(f"Created VNet '{vnet_name}' for user {username}")
+                        return vnet_name
+                    else:
+                        return None
+
+            # If we get here, we couldn't find an available number
+            logger.error(f"Could not find available VNet number for user {username}")
+            return None
 
         except Exception as e:
             logger.error(f"Error ensuring VNet for {username}: {e}")
