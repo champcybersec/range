@@ -59,8 +59,7 @@ PROXMOX_NODE = secrets["proxmox"].get("node", "pve")
 SUPER_SECRET = secrets.get("web", {}).get("admin_password", "changeme")
 AUTHK = "yup"  # Authentication cookie value
 
-# Default password for newly created PVE users (legacy support)
-DEFAULT_USER_PASSWORD = secrets.get("web", {}).get("default_user_password", "ChangeMe123!")
+
 
 
 def get_vnet_for_user(proxmox: ProxmoxAPI, username: str) -> Optional[str]:
@@ -191,7 +190,7 @@ def adm():
         Admin page with Proxmox connection info, or redirect to login
     """
     if request.cookies.get("sk-lol") == AUTHK:
-        return render_template("admin.html", prox_login=PROXMOX_USER, passw=DEFAULT_USER_PASSWORD)
+        return render_template("admin.html", prox_login=PROXMOX_USER)
     else:
         return redirect("/login?next=/admin")
 
@@ -300,24 +299,7 @@ def mrange():
         return str(e)
 
 
-@app.route("/selfserve", methods=["GET", "POST"])
-def selfserve():
-    """
-    DEPRECATED: Self-service VM creation page.
-    
-    This endpoint has been deprecated as it relied on PVE realm authentication.
-    Users should now use the main clone interface with AD authentication.
-    
-    Returns:
-        Deprecation notice
-    """
-    return render_template("page.html", content="""
-        <h2>Service Discontinued</h2>
-        <p>The self-service VM creation feature has been discontinued.</p>
-        <p>All user operations now require AD realm authentication.</p>
-        <p>Please contact an administrator to create your account on the domain controller.</p>
-        <p>You can then use the main <a href="/clone">VM cloning interface</a>.</p>
-    """)
+
 
 
 @app.route("/clone", methods=["GET", "POST"])

@@ -134,7 +134,6 @@ node = "pve"               # Node name
 
 [web]
 admin_password = "changeme"          # Web admin password
-default_user_password = "ChangeMe123!" # Default for new PVE users
 ```
 
 ## Web Endpoints
@@ -144,7 +143,6 @@ default_user_password = "ChangeMe123!" # Default for new PVE users
 - `/admin` - Administrative dashboard
 - `/clone` - Individual VM cloning with AD integration
 - `/range` - Bulk VM cloning (admin only)
-- `/selfserve` - Self-service VM creation (legacy)
 - `/ensure` - User management helper (admin only)
 
 ## Development
