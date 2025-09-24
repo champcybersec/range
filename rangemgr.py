@@ -50,6 +50,51 @@ def load_secrets(secrets_path: Optional[str] = None) -> Dict[str, Any]:
         return tomli.load(f)
 
 
+def load_vmids(vmids_path: Optional[str] = None) -> Dict[str, str]:
+    """
+    Load VM template configuration from vmids.toml file.
+
+    Args:
+        vmids_path: Optional path to vmids file. If None, uses default location.
+
+    Returns:
+        Dict mapping VMID strings to human-readable names
+
+    Raises:
+        FileNotFoundError: If vmids.toml file is not found
+        tomli.TOMLDecodeError: If the TOML file is malformed
+    """
+    if vmids_path is None:
+        vmids_path = os.path.join(os.path.dirname(__file__), "vmids.toml")
+
+    logger.debug(f"Loading VM templates from {vmids_path}")
+    with open(vmids_path, "rb") as f:
+        config = tomli.load(f)
+        return config.get("templates", {})
+
+
+def load_infra_config(infra_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load infrastructure configuration from infra.toml file.
+
+    Args:
+        infra_path: Optional path to infra file. If None, uses default location.
+
+    Returns:
+        Dict containing infrastructure configuration sections
+
+    Raises:
+        FileNotFoundError: If infra.toml file is not found
+        tomli.TOMLDecodeError: If the TOML file is malformed
+    """
+    if infra_path is None:
+        infra_path = os.path.join(os.path.dirname(__file__), "infra.toml")
+
+    logger.debug(f"Loading infrastructure config from {infra_path}")
+    with open(infra_path, "rb") as f:
+        return tomli.load(f)
+
+
 def get_proxmox_client(secrets: Optional[Dict[str, Any]] = None) -> ProxmoxAPI:
     """
     Create and return an authenticated ProxmoxAPI client.
@@ -506,38 +551,58 @@ class NetworkManager:
             logger.error(f"Failed to delete VNet {vnet_name}: {e}")
             return False
 
-    def ensure_user_vnet(self, username: str, zone: str = "CMPCCDC") -> Optional[str]:
+    def ensure_user_vnet(
+        self, username: str, zone: Optional[str] = None
+    ) -> Optional[str]:
         """
         Ensure a VNet exists for a user.
 
         Args:
             username: Username to create VNet for
-            zone: SDN zone to create VNet in
+            zone: SDN zone to create VNet in (defaults to value from infra.toml)
 
         Returns:
             VNet name if successful, None otherwise
         """
         try:
-            # Generate VNet name from username
-            if "." in username:
-                parts = username.split(".")
+            # Load infrastructure configuration if zone not provided
+            if zone is None:
+                infra_config = load_infra_config()
+                naming_config = infra_config.get("naming", {})
+                zone = naming_config.get("vnet_zone", "CMPCCDC")
+                vnet_prefix = naming_config.get("vnet_prefix", "RN")
             else:
-                parts = ["N", username[0]]
+                vnet_prefix = "RN"  # Default fallback
 
-            vnet_name = f"RN{parts[0][0]}{parts[1][0]}"
-
-            # Check if VNet already exists
+            # Get existing VNets
             vnets = self.get_vnets()
-            vnet_exists = any(v.get("vnet") == vnet_name for v in vnets)
 
-            if not vnet_exists:
-                if self.create_vnet(vnet_name, zone, username):
-                    return vnet_name
-                else:
-                    return None
-            else:
-                logger.info(f"VNet '{vnet_name}' already exists for user {username}")
-                return vnet_name
+            # First check if a VNet already exists for this user (by checking alias field)
+            for vnet in vnets:
+                if vnet.get("alias") == username:
+                    existing_vnet_name = vnet.get("vnet")
+                    logger.info(
+                        f"VNet '{existing_vnet_name}' already exists for user {username}"
+                    )
+                    return existing_vnet_name
+
+            # Generate a unique numeric VNet name RN# format (no zero padding)
+            existing_vnet_names = {v.get("vnet", "") for v in vnets}
+
+            # Find the next available number starting from 37 to avoid conflicts with existing RN1-RN36
+            for i in range(37, 1000000):  # Support up to 999999 users as requested
+                vnet_name = f"{vnet_prefix}{i}"
+                if vnet_name not in existing_vnet_names:
+                    # Create the new VNet with username in alias field
+                    if self.create_vnet(vnet_name, zone, username):
+                        logger.info(f"Created VNet '{vnet_name}' for user {username}")
+                        return vnet_name
+                    else:
+                        return None
+
+            # If we get here, we couldn't find an available number
+            logger.error(f"Could not find available VNet number for user {username}")
+            return None
 
         except Exception as e:
             logger.error(f"Error ensuring VNet for {username}: {e}")
@@ -639,7 +704,7 @@ class RangeManager:
         self.pools = PoolManager(self.proxmox)
 
     def user_has_complete_range(
-        self, username: str, pool_suffix: str = "-range"
+        self, username: str, pool_suffix: Optional[str] = None
     ) -> bool:
         """
         Check if a user already has a complete range setup.
@@ -651,14 +716,23 @@ class RangeManager:
 
         Args:
             username: Username (without realm)
-            pool_suffix: Suffix for the pool name
+            pool_suffix: Suffix for the pool name (defaults to value from infra.toml)
 
         Returns:
             True if user has complete setup, False otherwise
         """
         try:
+            # Load infrastructure configuration if pool_suffix not provided
+            if pool_suffix is None:
+                infra_config = load_infra_config()
+                naming_config = infra_config.get("naming", {})
+                pool_suffix = naming_config.get("pool_suffix", "-range")
+                vyos_suffix = naming_config.get("vyos_suffix", "-range-vyos")
+            else:
+                vyos_suffix = "-range-vyos"  # Default fallback
+
             pool_name = f"{username}{pool_suffix}"
-            vyos_name = f"{username}-range-vyos"
+            vyos_name = f"{username}{vyos_suffix}"
 
             # Check if pool exists
             if not self.pools.pool_exists(pool_name):
@@ -700,7 +774,10 @@ class RangeManager:
             return False
 
     def setup_user_range(
-        self, username: str, base_vmid: int = 150, pool_suffix: str = "-range"
+        self,
+        username: str,
+        base_vmid: Optional[int] = None,
+        pool_suffix: Optional[str] = None,
     ) -> bool:
         """
         Set up a complete range environment for a user.
@@ -714,13 +791,24 @@ class RangeManager:
 
         Args:
             username: Username (without realm)
-            base_vmid: Base VM ID to clone from
-            pool_suffix: Suffix for the pool name
+            base_vmid: Base VM ID to clone from (defaults to value from infra.toml)
+            pool_suffix: Suffix for the pool name (defaults to value from infra.toml)
 
         Returns:
             True if successful, False otherwise
         """
         try:
+            # Load infrastructure configuration
+            infra_config = load_infra_config()
+            naming_config = infra_config.get("naming", {})
+            networking_config = infra_config.get("networking", {})
+
+            # Use provided parameters or fall back to config defaults
+            if pool_suffix is None:
+                pool_suffix = naming_config.get("pool_suffix", "-range")
+            if base_vmid is None:
+                base_vmid = networking_config.get("vyos_base_vmid", 150)
+
             # Validate user exists in AD realm first
             if not self.users.validate_ad_user(username):
                 logger.error(self.users.get_ad_user_error_message(username))
@@ -747,7 +835,8 @@ class RangeManager:
 
             # Get next available VM ID
             new_vmid = self.proxmox.cluster.nextid.get()
-            clone_name = f"{username}-range-vyos"
+            vyos_suffix = naming_config.get("vyos_suffix", "-range-vyos")
+            clone_name = f"{username}{vyos_suffix}"
 
             # Clone the gateway VM
             if not self.vms.clone_vm(base_vmid, new_vmid, clone_name, pool_name):
@@ -769,9 +858,18 @@ class RangeManager:
     def _configure_vm_networking(self, vmid: int, vnet_name: str):
         """Configure networking for a cloned VM."""
         try:
-            # Set net0 to INFRANET and net1 to user's VNet
-            net0 = "virtio,bridge=INFRANET"
-            net1 = f"virtio,bridge={vnet_name}"
+            # Load infrastructure configuration
+            infra_config = load_infra_config()
+            networking_config = infra_config.get("networking", {})
+
+            # Get network configuration from infra.toml
+            infranet_bridge = networking_config.get("infranet_bridge", "INFRANET")
+            net0_type = networking_config.get("net0_type", "virtio")
+            net1_type = networking_config.get("net1_type", "virtio")
+
+            # Set net0 to infrastructure network and net1 to user's VNet
+            net0 = f"{net0_type},bridge={infranet_bridge}"
+            net1 = f"{net1_type},bridge={vnet_name}"
 
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net1=net1)

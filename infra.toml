@@ -1,0 +1,26 @@
+# Infrastructure Configuration
+# This file defines the naming schemes and configuration for infrastructure components
+
+[naming]
+# Pool naming: {username} + pool_suffix
+pool_suffix = "-range"
+
+# VNet naming: Generated as RN# format where # are natural numbers (e.g., RN37, RN38, RN999999)
+# Starts from RN37 to avoid conflicts with existing RN1-RN36 in the environment
+# The alias field is set to the full username from AD to map back to the user
+vnet_prefix = "RN"
+vnet_zone = "CMPCCDC"
+
+# VyOS gateway naming: {username} + vyos_suffix
+vyos_suffix = "-range-vyos"
+
+[networking]
+# Default VyOS gateway template VMID
+vyos_base_vmid = 150
+
+# Network interface configuration for VyOS gateways
+# net0 connects to infrastructure network
+# net1 connects to user-specific VNet
+infranet_bridge = "INFRANET"
+net0_type = "virtio"
+net1_type = "virtio"

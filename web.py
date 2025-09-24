@@ -313,7 +313,19 @@ def clone_page():
         POST: Success page with new VM details or error message
     """
     if request.method == "GET":
-        return render_template("page.html", content=render_template("clone.html"))
+        # Load VM templates from TOML configuration
+        from rangemgr import load_vmids
+
+        try:
+            vm_templates = load_vmids()
+        except Exception as e:
+            logger.error(f"Failed to load VM templates: {e}")
+            vm_templates = {}
+
+        return render_template(
+            "page.html",
+            content=render_template("clone.html", vm_templates=vm_templates),
+        )
     username = request.form.get("username").strip()
     vmid = int(request.form.get("vmid"))
     if not username or not vmid:

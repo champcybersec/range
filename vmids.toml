@@ -1,0 +1,12 @@
+# VM Template Configuration
+# This file defines the available VM templates for cloning in the web interface
+# Each entry maps a VMID to a human-readable name displayed in the UI
+
+[templates]
+"210" = "Linux - Threat Hunting wk1"
+"117" = "Windows - Threat Hunting wk1"
+"129" = "Linux - Inject Night"
+"130" = "Windows - Inject Night"
+"106" = "Windows 10 Base - Scripting Night"
+"151" = "Xubuntu 22.04 Base - Scripting Night"
+"145" = "FreeBSD Nginx Bonus - Scripting Night?"
