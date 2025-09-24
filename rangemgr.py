@@ -387,7 +387,7 @@ class UserManager:
         try:
             # URL encode the userid for the API call
             encoded_userid = urllib.parse.quote(userid, safe="")
-            response = self.proxmox.access.users(encoded_userid).delete()
+            self.proxmox.access.users(encoded_userid).delete()
             logger.info(f"Deleted user {userid}")
             return True
         except Exception as e:
@@ -646,7 +646,7 @@ class RangeManager:
 
         This checks for:
         - User pool exists
-        - User VNet exists  
+        - User VNet exists
         - VyOS gateway VM exists with correct name and is in user's pool
 
         Args:
@@ -684,12 +684,14 @@ class RangeManager:
                 vm_config = self.proxmox.nodes(self.node).qemu(vmid).config.get()
                 vm_pool = vm_config.get("pool")
                 if vm_pool != pool_name:
-                    logger.debug(f"VyOS VM {vmid} is in pool {vm_pool}, expected {pool_name}")
+                    logger.debug(
+                        f"VyOS VM {vmid} is in pool {vm_pool}, expected {pool_name}"
+                    )
                     return False
             except Exception as e:
                 logger.warning(f"Could not verify pool for VM {vmid}: {e}")
                 # Don't fail completely if we can't check the pool, but log it
-                
+
             logger.info(f"User {username} already has complete range setup")
             return True
 
@@ -726,7 +728,9 @@ class RangeManager:
 
             # Check if user already has complete range setup
             if self.user_has_complete_range(username, pool_suffix):
-                logger.info(f"User {username} already has complete range setup, skipping")
+                logger.info(
+                    f"User {username} already has complete range setup, skipping"
+                )
                 return True
 
             pool_name = f"{username}{pool_suffix}"
