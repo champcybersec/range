@@ -551,7 +551,9 @@ class NetworkManager:
             logger.error(f"Failed to delete VNet {vnet_name}: {e}")
             return False
 
-    def ensure_user_vnet(self, username: str, zone: Optional[str] = None) -> Optional[str]:
+    def ensure_user_vnet(
+        self, username: str, zone: Optional[str] = None
+    ) -> Optional[str]:
         """
         Ensure a VNet exists for a user.
 
@@ -763,7 +765,10 @@ class RangeManager:
             return False
 
     def setup_user_range(
-        self, username: str, base_vmid: Optional[int] = None, pool_suffix: Optional[str] = None
+        self,
+        username: str,
+        base_vmid: Optional[int] = None,
+        pool_suffix: Optional[str] = None,
     ) -> bool:
         """
         Set up a complete range environment for a user.
@@ -788,13 +793,13 @@ class RangeManager:
             infra_config = load_infra_config()
             naming_config = infra_config.get("naming", {})
             networking_config = infra_config.get("networking", {})
-            
+
             # Use provided parameters or fall back to config defaults
             if pool_suffix is None:
                 pool_suffix = naming_config.get("pool_suffix", "-range")
             if base_vmid is None:
                 base_vmid = networking_config.get("vyos_base_vmid", 150)
-            
+
             # Validate user exists in AD realm first
             if not self.users.validate_ad_user(username):
                 logger.error(self.users.get_ad_user_error_message(username))
@@ -847,12 +852,12 @@ class RangeManager:
             # Load infrastructure configuration
             infra_config = load_infra_config()
             networking_config = infra_config.get("networking", {})
-            
+
             # Get network configuration from infra.toml
             infranet_bridge = networking_config.get("infranet_bridge", "INFRANET")
             net0_type = networking_config.get("net0_type", "virtio")
             net1_type = networking_config.get("net1_type", "virtio")
-            
+
             # Set net0 to infrastructure network and net1 to user's VNet
             net0 = f"{net0_type},bridge={infranet_bridge}"
             net1 = f"{net1_type},bridge={vnet_name}"
