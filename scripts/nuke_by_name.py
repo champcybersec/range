@@ -29,9 +29,10 @@ def main():
                 print(f"Destroying VM {vmid} ({vm_name}) on node {node_name}")
                 if vm['status'] == 'running':
                     print(f"Stopping VM {vmid}...")
-                    proxmox.nodes(node_name).qemu(vmid).status.stop.post()
-                    time.sleep(1)
-                proxmox.nodes(node_name).qemu(vmid).delete()
+                    for i in range(3):
+                        proxmox.nodes(node_name).qemu(vmid).status.stop.post(skiplock=1)
+                        time.sleep(0.25)
+                proxmox.nodes(node_name).qemu(vmid).delete(skiplock=1)
 
 if __name__ == "__main__":
     main()

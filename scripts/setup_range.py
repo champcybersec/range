@@ -97,6 +97,7 @@ def main():
             continue
 
         try:
+            # TODO: check if existing VYOS
             new_vmid = proxmox.cluster.nextid.get()
             clone_name = f"{username}-range-vyos"
             clone_range_gw(proxmox, 150, new_vmid, clone_name, pool_name, vnet_name)
