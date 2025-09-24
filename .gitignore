@@ -1,6 +1,7 @@
 .passkey
 .pvepw
 secrets.toml
+range.log
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
