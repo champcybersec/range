@@ -109,6 +109,14 @@ class VMManager:
         vms = self.get_vms()
         return [vm for vm in vms if vm.get("name", "").endswith(suffix)]
 
+    def find_vm_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Find a VM by exact name match."""
+        vms = self.get_vms()
+        for vm in vms:
+            if vm.get("name", "") == name:
+                return vm
+        return None
+
     def delete_vm(self, vmid: int, force: bool = False) -> bool:
         """
         Delete a VM by VMID.
@@ -379,7 +387,7 @@ class UserManager:
         try:
             # URL encode the userid for the API call
             encoded_userid = urllib.parse.quote(userid, safe="")
-            response = self.proxmox.access.users(encoded_userid).delete()
+            self.proxmox.access.users(encoded_userid).delete()
             logger.info(f"Deleted user {userid}")
             return True
         except Exception as e:
@@ -630,6 +638,67 @@ class RangeManager:
         self.networks = NetworkManager(self.proxmox)
         self.pools = PoolManager(self.proxmox)
 
+    def user_has_complete_range(
+        self, username: str, pool_suffix: str = "-range"
+    ) -> bool:
+        """
+        Check if a user already has a complete range setup.
+
+        This checks for:
+        - User pool exists
+        - User VNet exists
+        - VyOS gateway VM exists with correct name and is in user's pool
+
+        Args:
+            username: Username (without realm)
+            pool_suffix: Suffix for the pool name
+
+        Returns:
+            True if user has complete setup, False otherwise
+        """
+        try:
+            pool_name = f"{username}{pool_suffix}"
+            vyos_name = f"{username}-range-vyos"
+
+            # Check if pool exists
+            if not self.pools.pool_exists(pool_name):
+                logger.debug(f"Pool {pool_name} doesn't exist for {username}")
+                return False
+
+            # Check if VNet exists (this also returns the name if it exists)
+            vnet_name = self.networks.ensure_user_vnet(username)
+            if not vnet_name:
+                logger.debug(f"VNet doesn't exist for {username}")
+                return False
+
+            # Check if VyOS gateway VM exists
+            vyos_vm = self.vms.find_vm_by_name(vyos_name)
+            if not vyos_vm:
+                logger.debug(f"VyOS gateway VM {vyos_name} doesn't exist")
+                return False
+
+            # Verify the VM is in the correct pool
+            vmid = vyos_vm["vmid"]
+            try:
+                # Get VM config to check pool assignment
+                vm_config = self.proxmox.nodes(self.node).qemu(vmid).config.get()
+                vm_pool = vm_config.get("pool")
+                if vm_pool != pool_name:
+                    logger.debug(
+                        f"VyOS VM {vmid} is in pool {vm_pool}, expected {pool_name}"
+                    )
+                    return False
+            except Exception as e:
+                logger.warning(f"Could not verify pool for VM {vmid}: {e}")
+                # Don't fail completely if we can't check the pool, but log it
+
+            logger.info(f"User {username} already has complete range setup")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error checking complete range for {username}: {e}")
+            return False
+
     def setup_user_range(
         self, username: str, base_vmid: int = 150, pool_suffix: str = "-range"
     ) -> bool:
@@ -656,6 +725,13 @@ class RangeManager:
             if not self.users.validate_ad_user(username):
                 logger.error(self.users.get_ad_user_error_message(username))
                 return False
+
+            # Check if user already has complete range setup
+            if self.user_has_complete_range(username, pool_suffix):
+                logger.info(
+                    f"User {username} already has complete range setup, skipping"
+                )
+                return True
 
             pool_name = f"{username}{pool_suffix}"
 
