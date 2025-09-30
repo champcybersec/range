@@ -31,6 +31,7 @@ if __name__ == "__main__":
 5. Destroy ALL range VMs
 6. Ensure user VNet
 7. Ensure all user VNets
+8. Clone VM
 Q. Quit"""
         )
         c = input("> ")
@@ -167,5 +168,37 @@ Q. Quit"""
                     range_manager.networks.ensure_user_vnet(username)
 
             range_manager.networks.reload_sdn()
+        elif c == "8":
+            # Clone VM - simple cloning without range-specific logic
+            try:
+                base_vmid = int(input("Source VM ID to clone from: "))
+                new_vmid_input = input(
+                    "New VM ID (leave blank for auto-assign): "
+                ).strip()
+
+                if new_vmid_input:
+                    new_vmid = int(new_vmid_input)
+                else:
+                    new_vmid = range_manager.proxmox.cluster.nextid.get()
+
+                name = input("Name for new VM: ").strip()
+
+                if not name:
+                    print("Error: VM name is required")
+                    continue
+
+                print(f"Cloning VM {base_vmid} to {new_vmid} with name '{name}'...")
+                success = range_manager.vms.clone_vm(base_vmid, new_vmid, name)
+
+                if success:
+                    print(
+                        f"✓ Successfully cloned VM {base_vmid} to {new_vmid} ({name})"
+                    )
+                else:
+                    print(f"✗ Failed to clone VM {base_vmid}")
+            except ValueError as e:
+                print(f"Error: Invalid input - {e}")
+            except Exception as e:
+                print(f"Error: {e}")
         elif c.upper() == "Q":
             running = False
