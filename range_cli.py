@@ -163,7 +163,9 @@ def setup_network_commands(subparsers):
         "--end", type=int, default=100, help="Ending VNet number (default: 100)"
     )
     prep_parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would be created without making changes"
+        "--dry-run",
+        action="store_true",
+        help="Show what would be created without making changes",
     )
     prep_parser.add_argument(
         "--no-reload", action="store_true", help="Skip SDN reload at the end"
@@ -191,7 +193,12 @@ def setup_range_commands(subparsers):
         "--base-vmid",
         type=int,
         default=150,
-        help="Base VM to clone from (default: 150)",
+        help="Gateway VM to clone from (default: 150)",
+    )
+    setup_parser.add_argument(
+        "--vmids",
+        type=str,
+        help="Comma-separated list of additional VMIDs to clone (e.g., '100,102,103')",
     )
     setup_parser.add_argument(
         "--pool-suffix", default="-range", help="Pool name suffix (default: -range)"
@@ -205,7 +212,12 @@ def setup_range_commands(subparsers):
         "--base-vmid",
         type=int,
         default=150,
-        help="Base VM to clone from (default: 150)",
+        help="Gateway VM to clone from (default: 150)",
+    )
+    setup_all_parser.add_argument(
+        "--vmids",
+        type=str,
+        help="Comma-separated list of additional VMIDs to clone for each user (e.g., '100,102,103')",
     )
     setup_all_parser.add_argument(
         "--pool-suffix", default="-range", help="Pool name suffix (default: -range)"
@@ -380,7 +392,9 @@ def handle_network_commands(args, manager: RangeManager):
         created_count = 0
         skipped_count = 0
 
-        print(f"{'DRY RUN: ' if args.dry_run else ''}Creating VNets {vnet_prefix}{args.start} to {vnet_prefix}{args.end} in zone {zone}")
+        print(
+            f"{'DRY RUN: ' if args.dry_run else ''}Creating VNets {vnet_prefix}{args.start} to {vnet_prefix}{args.end} in zone {zone}"
+        )
 
         for i in range(args.start, args.end + 1):
             vnet_name = f"{vnet_prefix}{i}"
@@ -426,13 +440,58 @@ def handle_network_commands(args, manager: RangeManager):
 def handle_range_commands(args, manager: RangeManager):
     """Handle high-level range management commands."""
     if args.range_command == "setup":
+        # First, set up the gateway VM and infrastructure
         success = manager.setup_user_range(
             args.username, args.base_vmid, args.pool_suffix
         )
-        if success:
-            print(f"Successfully set up range for {args.username}")
+
+        if not success:
+            print(f"Failed to set up gateway for {args.username}")
+            return
+
+        # Clone additional VMs if specified
+        if args.vmids:
+            try:
+                additional_vmids = [int(vmid.strip()) for vmid in args.vmids.split(",")]
+                print(f"Cloning additional VMs: {additional_vmids}")
+            except ValueError as e:
+                print(f"Error parsing VMIDs: {e}")
+                return
+
+            pool_name = f"{args.username}{args.pool_suffix}"
+            all_vms_success = True
+
+            for base_vmid in additional_vmids:
+                new_vmid = manager.proxmox.cluster.nextid.get()
+                clone_name = f"{args.username}-range-{base_vmid}"
+
+                print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
+                vm_success = manager.vms.clone_vm(
+                    base_vmid, new_vmid, clone_name, pool_name
+                )
+
+                if vm_success:
+                    # Set permissions for the user on this VM
+                    try:
+                        manager.proxmox.access.acl.put(
+                            path=f"/vms/{new_vmid}",
+                            users=f"{args.username}@ad",
+                            roles="Administrator",
+                        )
+                        print(f"  ✓ Created VM {new_vmid} for {args.username}@ad")
+                    except Exception as e:
+                        print(f"  ✗ Failed to set permissions on VM {new_vmid}: {e}")
+                        all_vms_success = False
+                else:
+                    print(f"  ✗ Failed to clone VM {base_vmid}")
+                    all_vms_success = False
+
+            if all_vms_success:
+                print(f"Successfully set up complete range for {args.username}")
+            else:
+                print(f"Partially set up range for {args.username}")
         else:
-            print(f"Failed to set up range for {args.username}")
+            print(f"Successfully set up range for {args.username}")
 
     elif args.range_command == "setup-all":
         # Sync AD realm first
@@ -441,6 +500,16 @@ def handle_range_commands(args, manager: RangeManager):
             print("Synced AD realm")
         except Exception as e:
             print(f"Warning: AD realm sync failed: {e}")
+
+        # Parse additional VMIDs if provided
+        additional_vmids = []
+        if args.vmids:
+            try:
+                additional_vmids = [int(vmid.strip()) for vmid in args.vmids.split(",")]
+                print(f"Will clone additional VMs: {additional_vmids}")
+            except ValueError as e:
+                print(f"Error parsing VMIDs: {e}")
+                return
 
         # Get all AD users
         ad_users = manager.users.get_users("ad")
@@ -458,14 +527,50 @@ def handle_range_commands(args, manager: RangeManager):
             username = userid.split("@")[0]
             print(f"Setting up range for {username}...")
 
+            # First, set up the gateway VM and infrastructure
             success = manager.setup_user_range(
                 username, args.base_vmid, args.pool_suffix
             )
-            if success:
-                print(f"✓ Successfully set up range for {username}")
+
+            if not success:
+                print(f"✗ Failed to set up gateway for {username}")
+                continue
+
+            # Clone additional VMs if specified
+            pool_name = f"{username}{args.pool_suffix}"
+            all_vms_success = True
+
+            for base_vmid in additional_vmids:
+                new_vmid = manager.proxmox.cluster.nextid.get()
+                clone_name = f"{username}-range-{base_vmid}"
+
+                print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
+                vm_success = manager.vms.clone_vm(
+                    base_vmid, new_vmid, clone_name, pool_name
+                )
+
+                if vm_success:
+                    # Set permissions for the user on this VM
+                    try:
+                        manager.proxmox.access.acl.put(
+                            path=f"/vms/{new_vmid}",
+                            users=f"{username}@ad",
+                            roles="Administrator",
+                        )
+                        print(f"  ✓ Created VM {new_vmid} for {username}@ad")
+                    except Exception as e:
+                        print(f"  ✗ Failed to set permissions on VM {new_vmid}: {e}")
+                        all_vms_success = False
+                else:
+                    print(f"  ✗ Failed to clone VM {base_vmid}")
+                    all_vms_success = False
+
+            if all_vms_success:
+                print(f"✓ Successfully set up complete range for {username}")
                 setup_count += 1
             else:
-                print(f"✗ Failed to set up range for {username}")
+                print(f"⚠ Partially set up range for {username}")
+                setup_count += 1
 
         print(f"Set up ranges for {setup_count} users")
 
