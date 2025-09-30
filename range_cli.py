@@ -549,6 +549,8 @@ def handle_range_commands(args, manager: RangeManager):
                     base_vmid, new_vmid, clone_name, pool_name
                 )
 
+                manager.configure_vm_networking(new_vmid, manager.networks.get_vnet_for_user(username))
+
                 if vm_success:
                     # Set permissions for the user on this VM
                     try:

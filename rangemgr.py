@@ -944,7 +944,7 @@ class RangeManager:
                 return False
 
             # Configure networking for the cloned VM
-            self._configure_vm_networking(new_vmid, vnet_name)
+            self.configure_gateway_networking(new_vmid, vnet_name)
 
             # Set user permissions
             self._set_user_permissions(f"{username}@ad", pool_name, new_vmid)
@@ -956,8 +956,8 @@ class RangeManager:
             logger.error(f"Failed to setup range for {username}: {e}")
             return False
 
-    def _configure_vm_networking(self, vmid: int, vnet_name: str):
-        """Configure networking for a cloned VM."""
+    def configure_gateway_networking(self, vmid: int, vnet_name: str):
+        """Configure networking for a cloned gateway VM."""
         try:
             # Load infrastructure configuration
             infra_config = load_infra_config()
@@ -974,6 +974,23 @@ class RangeManager:
 
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net1=net1)
+
+            logger.info(f"Configured gateway networking for VM {vmid} with VNet {vnet_name}")
+        except Exception as e:
+            logger.error(f"Failed to configure gateway networking for VM {vmid}: {e}")
+
+    def configure_vm_networking(self, vmid: int, vnet_name: str):
+        """Configure networking for a non-gateway VM (set net0 to user's VNet)."""
+        try:
+            # Load infrastructure configuration
+            infra_config = load_infra_config()
+            networking_config = infra_config.get("networking", {})
+            net0_type ="e1000" #networking_config.get("net0_type", "e1000")
+
+            # Set net0 to user's VNet
+            net0 = f"{net0_type},bridge={vnet_name}"
+
+            self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
 
             logger.info(f"Configured networking for VM {vmid} with VNet {vnet_name}")
         except Exception as e:
