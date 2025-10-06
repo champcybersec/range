@@ -203,6 +203,11 @@ def setup_range_commands(subparsers):
     setup_parser.add_argument(
         "--pool-suffix", default="-range", help="Pool name suffix (default: -range)"
     )
+    setup_parser.add_argument(
+        "--preserve-mac",
+        action="store_true",
+        help="Preserve MAC addresses when cloning additional VMs (not gateway)",
+    )
 
     # Setup ranges for all AD users
     setup_all_parser = range_subparsers.add_parser(
@@ -224,6 +229,11 @@ def setup_range_commands(subparsers):
     )
     setup_all_parser.add_argument(
         "--skip-admins", action="store_true", help="Skip users with -adm in name"
+    )
+    setup_all_parser.add_argument(
+        "--preserve-mac",
+        action="store_true",
+        help="Preserve MAC addresses when cloning additional VMs (not gateway)",
     )
 
 
@@ -454,6 +464,8 @@ def handle_range_commands(args, manager: RangeManager):
             try:
                 additional_vmids = [int(vmid.strip()) for vmid in args.vmids.split(",")]
                 print(f"Cloning additional VMs: {additional_vmids}")
+                if args.preserve_mac:
+                    print("  MAC addresses will be preserved")
             except ValueError as e:
                 print(f"Error parsing VMIDs: {e}")
                 return
@@ -467,10 +479,21 @@ def handle_range_commands(args, manager: RangeManager):
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
                 vm_success = manager.vms.clone_vm(
-                    base_vmid, new_vmid, clone_name, pool_name
+                    base_vmid,
+                    new_vmid,
+                    clone_name,
+                    pool_name,
+                    preserve_mac=args.preserve_mac,
                 )
 
                 if vm_success:
+                    # Configure networking with MAC preservation if requested
+                    vnet_name = manager.networks.get_vnet_for_user(args.username)
+                    if vnet_name:
+                        manager.configure_vm_networking(
+                            new_vmid, vnet_name, preserve_mac=args.preserve_mac
+                        )
+
                     # Set permissions for the user on this VM
                     try:
                         manager.proxmox.access.acl.put(
@@ -507,6 +530,8 @@ def handle_range_commands(args, manager: RangeManager):
             try:
                 additional_vmids = [int(vmid.strip()) for vmid in args.vmids.split(",")]
                 print(f"Will clone additional VMs: {additional_vmids}")
+                if args.preserve_mac:
+                    print("  MAC addresses will be preserved")
             except ValueError as e:
                 print(f"Error parsing VMIDs: {e}")
                 return
@@ -546,10 +571,18 @@ def handle_range_commands(args, manager: RangeManager):
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
                 vm_success = manager.vms.clone_vm(
-                    base_vmid, new_vmid, clone_name, pool_name
+                    base_vmid,
+                    new_vmid,
+                    clone_name,
+                    pool_name,
+                    preserve_mac=args.preserve_mac,
                 )
 
-                manager.configure_vm_networking(new_vmid, manager.networks.get_vnet_for_user(username))
+                vnet_name = manager.networks.get_vnet_for_user(username)
+                if vnet_name:
+                    manager.configure_vm_networking(
+                        new_vmid, vnet_name, preserve_mac=args.preserve_mac
+                    )
 
                 if vm_success:
                     # Set permissions for the user on this VM

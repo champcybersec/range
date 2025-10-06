@@ -325,6 +325,102 @@ class VMManager:
         """Delete all VMs with names ending in '-range-gw'."""
         return self.nuke_by_pattern(r".*-range-gw$")
 
+    def get_vm_mac_addresses(self, vmid: int) -> Dict[str, str]:
+        """
+        Get MAC addresses from a VM's network interfaces.
+
+        Args:
+            vmid: VM ID to get MAC addresses from
+
+        Returns:
+            Dict mapping interface names (net0, net1, etc.) to MAC addresses
+        """
+        mac_addresses = {}
+        try:
+            config = self.proxmox.nodes(self.node).qemu(vmid).config.get()
+            # Look for network interface configurations (net0, net1, net2, etc.)
+            for key, value in config.items():
+                if key.startswith("net") and isinstance(value, str):
+                    # Parse network config string to extract MAC address
+                    # Format is typically: "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0"
+                    parts = value.split(",")
+                    for part in parts:
+                        if "=" in part:
+                            k, v = part.split("=", 1)
+                            # Check if this looks like a MAC address
+                            if ":" in v and len(v.split(":")) == 6:
+                                mac_addresses[key] = v
+                                logger.debug(f"Found MAC address for {key}: {v}")
+                                break
+        except Exception as e:
+            logger.error(f"Failed to get MAC addresses for VM {vmid}: {e}")
+        return mac_addresses
+
+    def set_vm_mac_addresses(
+        self,
+        vmid: int,
+        mac_addresses: Dict[str, str],
+        bridge_name: Optional[str] = None,
+    ) -> bool:
+        """
+        Set MAC addresses on a VM's network interfaces.
+
+        Args:
+            vmid: VM ID to set MAC addresses on
+            mac_addresses: Dict mapping interface names to MAC addresses
+            bridge_name: Optional bridge name to use for all interfaces
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            config = self.proxmox.nodes(self.node).qemu(vmid).config.get()
+
+            for net_interface, mac_address in mac_addresses.items():
+                if net_interface in config:
+                    # Get the existing network config
+                    existing_config = config[net_interface]
+                    parts = existing_config.split(",")
+
+                    # Extract the model/type (e.g., "virtio", "e1000")
+                    model = parts[0].split("=")[0] if "=" in parts[0] else "virtio"
+
+                    # Build new config with preserved MAC and optionally new bridge
+                    new_parts = [f"{model}={mac_address}"]
+
+                    # Add bridge (use provided or extract from existing)
+                    if bridge_name:
+                        new_parts.append(f"bridge={bridge_name}")
+                    else:
+                        # Keep existing bridge if present
+                        for part in parts:
+                            if part.startswith("bridge="):
+                                new_parts.append(part)
+                                break
+
+                    # Add any other parameters from original config (except old MAC)
+                    for part in parts[1:]:
+                        if not part.startswith("bridge=") and "=" in part:
+                            param_name = part.split("=")[0]
+                            # Skip parameters we're already handling
+                            if param_name not in ["bridge"]:
+                                new_parts.append(part)
+
+                    new_config = ",".join(new_parts)
+
+                    # Update the interface configuration
+                    update_params = {net_interface: new_config}
+                    self.proxmox.nodes(self.node).qemu(vmid).config.post(
+                        **update_params
+                    )
+                    logger.info(
+                        f"Set MAC address for VM {vmid} {net_interface}: {mac_address}"
+                    )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set MAC addresses for VM {vmid}: {e}")
+            return False
+
     def clone_vm(
         self,
         base_vmid: int,
@@ -332,6 +428,7 @@ class VMManager:
         name: str,
         pool: Optional[str] = None,
         full_clone: bool = False,
+        preserve_mac: bool = False,
     ) -> bool:
         """
         Clone a VM.
@@ -342,11 +439,20 @@ class VMManager:
             name: Name for the new VM
             pool: Optional pool to assign the VM to
             full_clone: Whether to make a full clone (default: linked clone)
+            preserve_mac: Whether to preserve MAC addresses from source VM
 
         Returns:
             True if successful, False otherwise
         """
         try:
+            # Get MAC addresses before cloning if preservation is requested
+            mac_addresses = {}
+            if preserve_mac:
+                mac_addresses = self.get_vm_mac_addresses(base_vmid)
+                logger.info(
+                    f"Preserving MAC addresses from VM {base_vmid}: {mac_addresses}"
+                )
+
             clone_params = {
                 "newid": new_vmid,
                 "name": name,
@@ -359,6 +465,16 @@ class VMManager:
 
             self.proxmox.nodes(self.node).qemu(base_vmid).clone.post(**clone_params)
             logger.info(f"Cloned VM {base_vmid} to {new_vmid} ({name})")
+
+            # Restore MAC addresses after cloning if requested
+            # Note: We don't change the bridge here as that will be done by configure_vm_networking
+            if preserve_mac and mac_addresses:
+                # Small delay to ensure clone operation is complete
+                import time
+
+                time.sleep(1)
+                self.set_vm_mac_addresses(new_vmid, mac_addresses)
+
             return True
         except Exception as e:
             logger.error(f"Failed to clone VM {base_vmid} to {new_vmid}: {e}")
@@ -558,7 +674,7 @@ class NetworkManager:
     ) -> Optional[str]:
         """
         Ensure a VNet exists for a user.
-        
+
         This method follows the new strategy:
         1. First check if user already has a VNet assigned
         2. Look for an unassigned VNet (no alias) and assign it
@@ -599,34 +715,46 @@ class NetworkManager:
                 vnet_name = vnet.get("vnet", "")
                 alias = vnet.get("alias")
                 # Check if this VNet matches our naming pattern and has no alias
-                if vnet_name.startswith(vnet_prefix) and (not alias or alias.strip() == ""):
+                if vnet_name.startswith(vnet_prefix) and (
+                    not alias or alias.strip() == ""
+                ):
                     # Extract number from VNet name to sort properly
                     try:
-                        vnet_num = int(vnet_name[len(vnet_prefix):])
+                        vnet_num = int(vnet_name[len(vnet_prefix) :])
                         unassigned_vnets.append((vnet_num, vnet_name))
                     except ValueError:
                         # Skip VNets that don't follow the expected naming pattern
                         continue
-            
+
             # Sort unassigned VNets by number and use the lowest available
             if unassigned_vnets:
                 unassigned_vnets.sort()  # Sort by number (first element of tuple)
-                _, vnet_name = unassigned_vnets[0]  # Get the VNet name from the first tuple
-                
+                _, vnet_name = unassigned_vnets[
+                    0
+                ]  # Get the VNet name from the first tuple
+
                 # Update the VNet to assign it to this user
                 try:
                     # Delete and recreate the VNet with the new alias
                     # This is the most reliable way to update the alias in Proxmox
                     if self.delete_vnet(vnet_name):
                         if self.create_vnet(vnet_name, zone, username):
-                            logger.info(f"Assigned existing VNet '{vnet_name}' to user {username}")
+                            logger.info(
+                                f"Assigned existing VNet '{vnet_name}' to user {username}"
+                            )
                             return vnet_name
                         else:
-                            logger.error(f"Failed to recreate VNet {vnet_name} with user alias")
+                            logger.error(
+                                f"Failed to recreate VNet {vnet_name} with user alias"
+                            )
                     else:
-                        logger.error(f"Failed to delete VNet {vnet_name} for reassignment")
+                        logger.error(
+                            f"Failed to delete VNet {vnet_name} for reassignment"
+                        )
                 except Exception as e:
-                    logger.error(f"Failed to assign VNet {vnet_name} to user {username}: {e}")
+                    logger.error(
+                        f"Failed to assign VNet {vnet_name} to user {username}: {e}"
+                    )
 
             # If no unassigned VNets are available, create a new one
             # Generate a unique numeric VNet name RN# format (no zero padding)
@@ -638,7 +766,9 @@ class NetworkManager:
                 if vnet_name not in existing_vnet_names:
                     # Create the new VNet with username in alias field
                     if self.create_vnet(vnet_name, zone, username):
-                        logger.info(f"Created new VNet '{vnet_name}' for user {username}")
+                        logger.info(
+                            f"Created new VNet '{vnet_name}' for user {username}"
+                        )
                         return vnet_name
                     else:
                         return None
@@ -657,13 +787,13 @@ class NetworkManager:
             # Get Proxmox connection details from secrets
             proxmox_config = self.secrets["proxmox"]
             host = proxmox_config["host"]
-            
+
             # Ensure host doesn't have trailing paths
             if host.endswith("/api2/json"):
                 host = host.replace("/api2/json", "")
             if not host.startswith("http"):
                 host = f"https://{host}"
-            
+
             # Get authentication ticket from proxmoxer connection
             # This is a bit of a hack but proxmoxer doesn't expose the ticket easily
             try:
@@ -672,35 +802,30 @@ class NetworkManager:
                 logger.info("Reloaded SDN configuration using proxmoxer")
                 return True
             except Exception as proxmoxer_error:
-                logger.warning(f"Proxmoxer SDN reload failed: {proxmoxer_error}, trying raw requests")
-                
+                logger.warning(
+                    f"Proxmoxer SDN reload failed: {proxmoxer_error}, trying raw requests"
+                )
+
                 # Fall back to raw requests
                 auth_url = f"{host}/api2/json/access/ticket"
                 auth_data = {
                     "username": proxmox_config["user"],
-                    "password": proxmox_config["password"]
+                    "password": proxmox_config["password"],
                 }
-                
+
                 verify_ssl = proxmox_config.get("verify_ssl", True)
-                
+
                 # Get authentication ticket
                 auth_response = requests.post(
-                    auth_url, 
-                    data=auth_data, 
-                    verify=verify_ssl,
-                    timeout=30
+                    auth_url, data=auth_data, verify=verify_ssl, timeout=30
                 )
                 auth_response.raise_for_status()
                 auth_data = auth_response.json()["data"]
-                
+
                 # Prepare headers for authenticated request
-                headers = {
-                    "CSRFPreventionToken": auth_data["CSRFPreventionToken"]
-                }
-                cookies = {
-                    "PVEAuthCookie": auth_data["ticket"]
-                }
-                
+                headers = {"CSRFPreventionToken": auth_data["CSRFPreventionToken"]}
+                cookies = {"PVEAuthCookie": auth_data["ticket"]}
+
                 # Make the SDN reload request
                 reload_url = f"{host}/api2/json/cluster/sdn/reload"
                 reload_response = requests.post(
@@ -708,13 +833,13 @@ class NetworkManager:
                     headers=headers,
                     cookies=cookies,
                     verify=verify_ssl,
-                    timeout=30
+                    timeout=30,
                 )
                 reload_response.raise_for_status()
-                
+
                 logger.info("Reloaded SDN configuration using raw requests API")
                 return True
-                
+
         except Exception as e:
             logger.error(f"Failed to reload SDN configuration: {e}")
             return False
@@ -975,20 +1100,53 @@ class RangeManager:
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net1=net1)
 
-            logger.info(f"Configured gateway networking for VM {vmid} with VNet {vnet_name}")
+            logger.info(
+                f"Configured gateway networking for VM {vmid} with VNet {vnet_name}"
+            )
         except Exception as e:
             logger.error(f"Failed to configure gateway networking for VM {vmid}: {e}")
 
-    def configure_vm_networking(self, vmid: int, vnet_name: str):
+    def configure_vm_networking(
+        self, vmid: int, vnet_name: str, preserve_mac: bool = False
+    ):
         """Configure networking for a non-gateway VM (set net0 to user's VNet)."""
         try:
-            # Load infrastructure configuration
-            infra_config = load_infra_config()
-            networking_config = infra_config.get("networking", {})
-            net0_type ="e1000" #networking_config.get("net0_type", "e1000")
+            net0_type = "e1000"
 
-            # Set net0 to user's VNet
-            net0 = f"{net0_type},bridge={vnet_name}"
+            if preserve_mac:
+                # Get current VM config to preserve MAC address
+                config = self.proxmox.nodes(self.node).qemu(vmid).config.get()
+                if "net0" in config:
+                    existing_config = config["net0"]
+                    # Extract MAC address if present
+                    parts = existing_config.split(",")
+                    mac_address = None
+                    for part in parts:
+                        if "=" in part:
+                            k, v = part.split("=", 1)
+                            # Check if this looks like a MAC address
+                            if ":" in v and len(v.split(":")) == 6:
+                                mac_address = v
+                                break
+
+                    if mac_address:
+                        # Set net0 with preserved MAC address
+                        net0 = f"{net0_type}={mac_address},bridge={vnet_name}"
+                        logger.info(
+                            f"Configuring VM {vmid} with preserved MAC: {mac_address}"
+                        )
+                    else:
+                        # Fall back to standard config if MAC not found
+                        net0 = f"{net0_type},bridge={vnet_name}"
+                        logger.warning(
+                            f"No MAC address found for VM {vmid}, using default config"
+                        )
+                else:
+                    # Fall back if net0 doesn't exist
+                    net0 = f"{net0_type},bridge={vnet_name}"
+            else:
+                # Standard configuration without MAC preservation
+                net0 = f"{net0_type},bridge={vnet_name}"
 
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
 
