@@ -277,7 +277,7 @@ def handle_vm_commands(args, manager: RangeManager):
 
     elif args.vm_command == "clone":
         new_vmid = manager.proxmox.cluster.nextid.get()
-        success = manager.vms.clone_vm(
+        success, _ = manager.vms.clone_vm(
             args.base_vmid, new_vmid, args.name, args.pool, args.full
         )
         if success:
@@ -478,7 +478,7 @@ def handle_range_commands(args, manager: RangeManager):
                 clone_name = f"{args.username}-range-{base_vmid}"
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
-                vm_success = manager.vms.clone_vm(
+                vm_success, template_mac_addresses = manager.vms.clone_vm(
                     base_vmid,
                     new_vmid,
                     clone_name,
@@ -491,7 +491,10 @@ def handle_range_commands(args, manager: RangeManager):
                     vnet_name = manager.networks.get_vnet_for_user(args.username)
                     if vnet_name:
                         manager.configure_vm_networking(
-                            new_vmid, vnet_name, preserve_mac=args.preserve_mac
+                            new_vmid,
+                            vnet_name,
+                            preserve_mac=args.preserve_mac,
+                            template_mac_addresses=template_mac_addresses,
                         )
 
                     # Set permissions for the user on this VM
@@ -570,7 +573,7 @@ def handle_range_commands(args, manager: RangeManager):
                 clone_name = f"{username}-range-{base_vmid}"
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
-                vm_success = manager.vms.clone_vm(
+                vm_success, template_mac_addresses = manager.vms.clone_vm(
                     base_vmid,
                     new_vmid,
                     clone_name,
@@ -581,7 +584,10 @@ def handle_range_commands(args, manager: RangeManager):
                 vnet_name = manager.networks.get_vnet_for_user(username)
                 if vnet_name:
                     manager.configure_vm_networking(
-                        new_vmid, vnet_name, preserve_mac=args.preserve_mac
+                        new_vmid,
+                        vnet_name,
+                        preserve_mac=args.preserve_mac,
+                        template_mac_addresses=template_mac_addresses,
                     )
 
                 if vm_success:
