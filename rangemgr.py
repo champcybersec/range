@@ -1111,10 +1111,7 @@ class RangeManager:
     ):
         """Configure networking for a non-gateway VM (set net0 to user's VNet)."""
         try:
-            # Load infrastructure configuration
-            infra_config = load_infra_config()
-            networking_config = infra_config.get("networking", {})
-            net0_type = "e1000"  # networking_config.get("net0_type", "e1000")
+            net0_type = "e1000"
 
             if preserve_mac:
                 # Get current VM config to preserve MAC address
