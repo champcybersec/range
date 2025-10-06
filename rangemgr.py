@@ -429,7 +429,7 @@ class VMManager:
         pool: Optional[str] = None,
         full_clone: bool = False,
         preserve_mac: bool = False,
-    ) -> bool:
+    ) -> tuple[bool, Optional[Dict[str, str]]]:
         """
         Clone a VM.
 
@@ -442,7 +442,9 @@ class VMManager:
             preserve_mac: Whether to preserve MAC addresses from source VM
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success: bool, mac_addresses: Optional[Dict[str, str]])
+            - success: True if cloning was successful, False otherwise
+            - mac_addresses: Dictionary of preserved MAC addresses if preserve_mac=True, None otherwise
         """
         try:
             # Get MAC addresses before cloning if preservation is requested
@@ -475,10 +477,11 @@ class VMManager:
                 time.sleep(1)
                 self.set_vm_mac_addresses(new_vmid, mac_addresses)
 
-            return True
+            # Return the MAC addresses so they can be used by configure_vm_networking
+            return True, mac_addresses if preserve_mac else None
         except Exception as e:
             logger.error(f"Failed to clone VM {base_vmid} to {new_vmid}: {e}")
-            return False
+            return False, None
 
 
 class UserManager:
@@ -1065,7 +1068,8 @@ class RangeManager:
             clone_name = f"{username}{vyos_suffix}"
 
             # Clone the gateway VM
-            if not self.vms.clone_vm(base_vmid, new_vmid, clone_name, pool_name):
+            success, _ = self.vms.clone_vm(base_vmid, new_vmid, clone_name, pool_name)
+            if not success:
                 return False
 
             # Configure networking for the cloned VM
@@ -1107,46 +1111,41 @@ class RangeManager:
             logger.error(f"Failed to configure gateway networking for VM {vmid}: {e}")
 
     def configure_vm_networking(
-        self, vmid: int, vnet_name: str, preserve_mac: bool = False
+        self,
+        vmid: int,
+        vnet_name: str,
+        preserve_mac: bool = False,
+        template_mac_addresses: Optional[Dict[str, str]] = None,
     ):
-        """Configure networking for a non-gateway VM (set net0 to user's VNet)."""
+        """Configure networking for a non-gateway VM (set net0 to user's VNet).
+
+        Args:
+            vmid: VM ID to configure
+            vnet_name: VNet bridge name
+            preserve_mac: Whether to preserve MAC addresses
+            template_mac_addresses: MAC addresses from template VM (used when preserve_mac=True)
+        """
         try:
             net0_type = "e1000"
 
-            if preserve_mac:
-                # Get current VM config to preserve MAC address
-                config = self.proxmox.nodes(self.node).qemu(vmid).config.get()
-                if "net0" in config:
-                    existing_config = config["net0"]
-                    # Extract MAC address if present
-                    parts = existing_config.split(",")
-                    mac_address = None
-                    for part in parts:
-                        if "=" in part:
-                            k, v = part.split("=", 1)
-                            # Check if this looks like a MAC address
-                            if ":" in v and len(v.split(":")) == 6:
-                                mac_address = v
-                                break
-
-                    if mac_address:
-                        # Set net0 with preserved MAC address
-                        net0 = f"{net0_type}={mac_address},bridge={vnet_name}"
-                        logger.info(
-                            f"Configuring VM {vmid} with preserved MAC: {mac_address}"
-                        )
-                    else:
-                        # Fall back to standard config if MAC not found
-                        net0 = f"{net0_type},bridge={vnet_name}"
-                        logger.warning(
-                            f"No MAC address found for VM {vmid}, using default config"
-                        )
-                else:
-                    # Fall back if net0 doesn't exist
-                    net0 = f"{net0_type},bridge={vnet_name}"
+            if (
+                preserve_mac
+                and template_mac_addresses
+                and "net0" in template_mac_addresses
+            ):
+                # Use MAC address from template VM
+                mac_address = template_mac_addresses["net0"]
+                net0 = f"{net0_type}={mac_address},bridge={vnet_name}"
+                logger.info(
+                    f"Configuring VM {vmid} with preserved MAC from template: {mac_address}"
+                )
             else:
                 # Standard configuration without MAC preservation
                 net0 = f"{net0_type},bridge={vnet_name}"
+                if preserve_mac and not template_mac_addresses:
+                    logger.warning(
+                        f"MAC preservation requested for VM {vmid} but no template MAC addresses provided"
+                    )
 
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
 
