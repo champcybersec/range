@@ -476,6 +476,8 @@ def handle_range_commands(args, manager: RangeManager):
                 print(f"Cloning additional VMs: {additional_vmids}")
                 if args.preserve_mac:
                     print("  MAC addresses will be preserved")
+                if args.retrowin:
+                    print("  Using rtl8139 network interface type (retro Windows mode)")
             except ValueError as e:
                 print(f"Error parsing VMIDs: {e}")
                 return
@@ -546,6 +548,8 @@ def handle_range_commands(args, manager: RangeManager):
                 print(f"Will clone additional VMs: {additional_vmids}")
                 if args.preserve_mac:
                     print("  MAC addresses will be preserved")
+                if args.retrowin:
+                    print("  Using rtl8139 network interface type (retro Windows mode)")
             except ValueError as e:
                 print(f"Error parsing VMIDs: {e}")
                 return
