@@ -1116,6 +1116,7 @@ class RangeManager:
         vnet_name: str,
         preserve_mac: bool = False,
         template_mac_addresses: Optional[Dict[str, str]] = None,
+        retrowin: bool = False,
     ):
         """Configure networking for a non-gateway VM (set net0 to user's VNet).
 
@@ -1124,9 +1125,10 @@ class RangeManager:
             vnet_name: VNet bridge name
             preserve_mac: Whether to preserve MAC addresses
             template_mac_addresses: MAC addresses from template VM (used when preserve_mac=True)
+            retrowin: Whether to use rtl8139 interface type instead of e1000 (for retro Windows VMs)
         """
         try:
-            net0_type = "e1000"
+            net0_type = "rtl8139" if retrowin else "e1000"
 
             if (
                 preserve_mac

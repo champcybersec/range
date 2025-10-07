@@ -208,6 +208,11 @@ def setup_range_commands(subparsers):
         action="store_true",
         help="Preserve MAC addresses when cloning additional VMs (not gateway)",
     )
+    setup_parser.add_argument(
+        "--retrowin",
+        action="store_true",
+        help="Use rtl8139 network interface type instead of e1000 (for retro Windows VMs)",
+    )
 
     # Setup ranges for all AD users
     setup_all_parser = range_subparsers.add_parser(
@@ -234,6 +239,11 @@ def setup_range_commands(subparsers):
         "--preserve-mac",
         action="store_true",
         help="Preserve MAC addresses when cloning additional VMs (not gateway)",
+    )
+    setup_all_parser.add_argument(
+        "--retrowin",
+        action="store_true",
+        help="Use rtl8139 network interface type instead of e1000 (for retro Windows VMs)",
     )
 
 
@@ -495,6 +505,7 @@ def handle_range_commands(args, manager: RangeManager):
                             vnet_name,
                             preserve_mac=args.preserve_mac,
                             template_mac_addresses=template_mac_addresses,
+                            retrowin=args.retrowin,
                         )
 
                     # Set permissions for the user on this VM
@@ -588,6 +599,7 @@ def handle_range_commands(args, manager: RangeManager):
                         vnet_name,
                         preserve_mac=args.preserve_mac,
                         template_mac_addresses=template_mac_addresses,
+                        retrowin=args.retrowin,
                     )
 
                 if vm_success:
