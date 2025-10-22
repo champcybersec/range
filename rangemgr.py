@@ -1117,6 +1117,7 @@ class RangeManager:
         preserve_mac: bool = False,
         template_mac_addresses: Optional[Dict[str, str]] = None,
         retrowin: bool = False,
+        template_vmid: Optional[int] = None,
     ):
         """Configure networking for a non-gateway VM (set net0 to user's VNet).
 
@@ -1126,9 +1127,22 @@ class RangeManager:
             preserve_mac: Whether to preserve MAC addresses
             template_mac_addresses: MAC addresses from template VM (used when preserve_mac=True)
             retrowin: Whether to use rtl8139 interface type instead of e1000 (for retro Windows VMs)
+            template_vmid: VMID of the template being cloned (to preserve interface type)
         """
         try:
-            net0_type = "rtl8139" if retrowin else "e1000"
+            # Determine interface type
+            if retrowin:
+                net0_type = "rtl8139"
+            elif preserve_mac:
+                net0_type = "e1000"
+            elif template_vmid is not None:
+                # Try to get the interface type from the template VM
+                config = self.proxmox.nodes(self.node).qemu(template_vmid).config.get()
+                net0_config = config.get("net0", "")
+                # Extract type (e.g., "virtio", "e1000", etc.)
+                net0_type = net0_config.split("=")[0] if "=" in net0_config else "virtio"
+            else:
+                net0_type = "virtio"
 
             if (
                 preserve_mac
@@ -1151,7 +1165,7 @@ class RangeManager:
 
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
 
-            logger.info(f"Configured networking for VM {vmid} with VNet {vnet_name}")
+            logger.info(f"Configured networking for VM {vmid} with VNet {vnet_name} and interface type {net0_type}")
         except Exception as e:
             logger.error(f"Failed to configure networking for VM {vmid}: {e}")
 
