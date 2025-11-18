@@ -51,7 +51,7 @@ except Exception as e:
 PROXMOX_HOST = secrets["proxmox"]["host"]  # e.g. 192.168.3.236
 PROXMOX_USER = secrets["proxmox"]["user"]  # e.g. root@pam
 PROXMOX_PASSWORD = secrets["proxmox"]["password"]
-PROXMOX_VERIFY_SSL = secrets["proxmox"].get("verify_ssl", True)
+PROXMOX_VERIFY_SSL = secrets["proxmox"].get("verify_ssl", False)
 PROXMOX_NODE = secrets["proxmox"].get("node", "pve")
 
 # Web application authentication

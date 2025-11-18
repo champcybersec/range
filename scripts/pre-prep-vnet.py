@@ -51,7 +51,9 @@ def create_vnet_range(
     created_count = 0
     skipped_count = 0
 
-    logger.info(f"{'DRY RUN: ' if dry_run else ''}Creating VNets {vnet_prefix}{start} to {vnet_prefix}{end} in zone {zone}")
+    logger.info(
+        f"{'DRY RUN: ' if dry_run else ''}Creating VNets {vnet_prefix}{start} to {vnet_prefix}{end} in zone {zone}"
+    )
 
     for i in range(start, end + 1):
         vnet_name = f"{vnet_prefix}{i}"
@@ -81,32 +83,21 @@ def main():
         description="Pre-create VNets to avoid downtime during user setup"
     )
     parser.add_argument(
-        "--start",
-        type=int,
-        default=1,
-        help="Starting VNet number (default: 1)"
+        "--start", type=int, default=1, help="Starting VNet number (default: 1)"
     )
     parser.add_argument(
-        "--end",
-        type=int,
-        default=100,
-        help="Ending VNet number (default: 100)"
+        "--end", type=int, default=100, help="Ending VNet number (default: 100)"
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be created without making changes"
+        help="Show what would be created without making changes",
     )
     parser.add_argument(
-        "--no-reload",
-        action="store_true",
-        help="Skip SDN reload at the end"
+        "--no-reload", action="store_true", help="Skip SDN reload at the end"
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable verbose logging"
+        "--verbose", "-v", action="store_true", help="Enable verbose logging"
     )
 
     args = parser.parse_args()
@@ -153,4 +144,5 @@ def main():
 
 if __name__ == "__main__":
     import logging
+
     sys.exit(main())

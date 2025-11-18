@@ -22,6 +22,7 @@ import time
 import tomli
 import urllib.parse
 import requests
+import urllib3
 from typing import Dict, List, Any, Optional
 from proxmoxer import ProxmoxAPI
 import logging
@@ -114,10 +115,16 @@ def get_proxmox_client(secrets: Optional[Dict[str, Any]] = None) -> ProxmoxAPI:
 
     proxmox_config = secrets["proxmox"]
     host = proxmox_config["host"]
+    verify_ssl = proxmox_config.get("verify_ssl", False)
 
     # Clean up host URL for proxmoxer
     if host.endswith("/api2/json"):
         host = host.replace("/api2/json", "")
+
+    # Suppress SSL warnings if SSL verification is disabled
+    if not verify_ssl:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        logger.debug("SSL verification disabled - suppressing SSL warnings")
 
     logger.debug(f"Connecting to Proxmox at {host} as {proxmox_config['user']}")
 
@@ -126,7 +133,7 @@ def get_proxmox_client(secrets: Optional[Dict[str, Any]] = None) -> ProxmoxAPI:
             host,
             user=proxmox_config["user"],
             password=proxmox_config["password"],
-            verify_ssl=proxmox_config.get("verify_ssl", True),
+            verify_ssl=verify_ssl,
         )
     except Exception as e:
         logger.error(f"Failed to connect to Proxmox: {e}")
@@ -816,7 +823,11 @@ class NetworkManager:
                     "password": proxmox_config["password"],
                 }
 
-                verify_ssl = proxmox_config.get("verify_ssl", True)
+                verify_ssl = proxmox_config.get("verify_ssl", False)
+
+                # Suppress SSL warnings if SSL verification is disabled
+                if not verify_ssl:
+                    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
                 # Get authentication ticket
                 auth_response = requests.post(
@@ -1140,7 +1151,9 @@ class RangeManager:
                 config = self.proxmox.nodes(self.node).qemu(template_vmid).config.get()
                 net0_config = config.get("net0", "")
                 # Extract type (e.g., "virtio", "e1000", etc.)
-                net0_type = net0_config.split("=")[0] if "=" in net0_config else "virtio"
+                net0_type = (
+                    net0_config.split("=")[0] if "=" in net0_config else "virtio"
+                )
             else:
                 net0_type = "virtio"
 
@@ -1165,7 +1178,9 @@ class RangeManager:
 
             self.proxmox.nodes(self.node).qemu(vmid).config.post(net0=net0)
 
-            logger.info(f"Configured networking for VM {vmid} with VNet {vnet_name} and interface type {net0_type}")
+            logger.info(
+                f"Configured networking for VM {vmid} with VNet {vnet_name} and interface type {net0_type}"
+            )
         except Exception as e:
             logger.error(f"Failed to configure networking for VM {vmid}: {e}")
 
