@@ -115,7 +115,7 @@ def get_proxmox_client(secrets: Optional[Dict[str, Any]] = None) -> ProxmoxAPI:
 
     proxmox_config = secrets["proxmox"]
     host = proxmox_config["host"]
-    verify_ssl = proxmox_config.get("verify_ssl", True)
+    verify_ssl = proxmox_config.get("verify_ssl", False)
 
     # Clean up host URL for proxmoxer
     if host.endswith("/api2/json"):
@@ -823,7 +823,7 @@ class NetworkManager:
                     "password": proxmox_config["password"],
                 }
 
-                verify_ssl = proxmox_config.get("verify_ssl", True)
+                verify_ssl = proxmox_config.get("verify_ssl", False)
 
                 # Suppress SSL warnings if SSL verification is disabled
                 if not verify_ssl:
