@@ -626,9 +626,28 @@ class NetworkManager:
         """
         try:
             vnets = self.get_vnets()
+            # Normalize username for comparison (lowercase and strip whitespace)
+            normalized_username = username.strip().lower()
+
+            # Don't match empty usernames
+            if not normalized_username:
+                logger.debug("Empty username provided, returning None")
+                return None
+
             for vnet in vnets:
-                if vnet.get("alias") == username:
-                    return vnet.get("vnet")
+                alias = vnet.get("alias", "")
+                # Normalize alias for comparison (lowercase and strip whitespace)
+                normalized_alias = alias.strip().lower()
+
+                # Use exact match after normalization to avoid partial matches
+                if normalized_alias and normalized_alias == normalized_username:
+                    vnet_name = vnet.get("vnet")
+                    logger.debug(
+                        f"Found VNet '{vnet_name}' for user '{username}' "
+                        f"(matched alias '{alias}')"
+                    )
+                    return vnet_name
+
             logger.debug(f"No VNet found for user {username}")
             return None
         except Exception as e:
@@ -710,12 +729,26 @@ class NetworkManager:
             # Get existing VNets
             vnets = self.get_vnets()
 
+            # Normalize username for comparison (lowercase and strip whitespace)
+            normalized_username = username.strip().lower()
+
+            # Don't proceed with empty usernames
+            if not normalized_username:
+                logger.error("Empty username provided to ensure_user_vnet")
+                return None
+
             # First check if a VNet already exists for this user (by checking alias field)
             for vnet in vnets:
-                if vnet.get("alias") == username:
+                alias = vnet.get("alias", "")
+                # Normalize alias for comparison (lowercase and strip whitespace)
+                normalized_alias = alias.strip().lower()
+
+                # Use exact match after normalization to avoid partial matches
+                if normalized_alias and normalized_alias == normalized_username:
                     existing_vnet_name = vnet.get("vnet")
                     logger.info(
-                        f"VNet '{existing_vnet_name}' already exists for user {username}"
+                        f"VNet '{existing_vnet_name}' already exists for user {username} "
+                        f"(matched alias '{alias}')"
                     )
                     return existing_vnet_name
 
