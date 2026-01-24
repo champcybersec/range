@@ -812,12 +812,16 @@ class NetworkManager:
             logger.error(f"Failed to delete VNet {vnet_name}: {e}")
             return False
 
-    def clear_all_vnet_aliases(self, dry_run: bool = False) -> Tuple[int, List[str]]:
+    def clear_all_vnet_aliases(
+        self, dry_run: bool = False, exclude: Optional[List[str]] = None
+    ) -> Tuple[int, List[str]]:
         """
-        Clear alias/description labels from all VNets.
+        Clear alias/description labels from all managed VNets, respecting exclusions.
 
         Args:
             dry_run: If True, logs planned changes without applying them.
+            exclude: Optional list of case-insensitive substrings. If any value matches
+                     the VNet's alias or description, that VNet will be skipped.
 
         Returns:
             Tuple containing (count of VNets processed, list of VNets that failed to update).
@@ -825,9 +829,17 @@ class NetworkManager:
         vnets = self.get_vnets()
         cleared_count = 0
         failed: List[str] = []
+        normalized_excludes = [
+            pattern.strip().lower()
+            for pattern in (exclude or [])
+            if pattern and pattern.strip()
+        ]
 
         for vnet in vnets:
             alias = (vnet.get("alias") or "").strip()
+            description = (vnet.get("description") or "").strip()
+            legacy_description = (vnet.get("descr") or "").strip()
+
             if not alias:
                 continue
 
@@ -845,6 +857,33 @@ class NetworkManager:
                     f"Skipping unmanaged VNet '{vnet_name}' in zone '{zone}' while clearing aliases"
                 )
                 continue
+
+            if normalized_excludes:
+                labels = [alias]
+                if description:
+                    labels.append(description)
+                if legacy_description and legacy_description not in labels:
+                    labels.append(legacy_description)
+
+                matched_pattern: Optional[str] = None
+                matched_label: Optional[str] = None
+
+                for label in labels:
+                    lower_label = label.lower()
+                    for pattern in normalized_excludes:
+                        if pattern in lower_label:
+                            matched_pattern = pattern
+                            matched_label = label
+                            break
+                    if matched_pattern:
+                        break
+
+                if matched_pattern:
+                    logger.info(
+                        f"Skipping VNet '{vnet_name}' in zone '{zone}' while clearing aliases "
+                        f"(label '{matched_label}' matched exclude value '{matched_pattern}')"
+                    )
+                    continue
 
             if dry_run:
                 logger.info(

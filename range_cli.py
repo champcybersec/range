@@ -195,6 +195,11 @@ def setup_network_commands(subparsers):
         action="store_true",
         help="Show which VNets would be cleared without making changes",
     )
+    clear_parser.add_argument(
+        "--exclude",
+        action="append",
+        help="Skip VNets whose alias/description contains this value (can be repeated)",
+    )
 
 
 def setup_pool_commands(subparsers):
@@ -504,7 +509,9 @@ def handle_network_commands(args, manager: RangeManager):
             print("No VNets created, skipping SDN reload")
 
     elif args.net_command == "clear-labels":
-        cleared, failed = manager.networks.clear_all_vnet_aliases(args.dry_run)
+        cleared, failed = manager.networks.clear_all_vnet_aliases(
+            args.dry_run, exclude=args.exclude
+        )
 
         if args.dry_run:
             print(f"Would clear labels from {cleared} VNets")

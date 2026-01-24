@@ -322,6 +322,45 @@ class TestClearAllVnetAliases(unittest.TestCase):
         self.assertEqual(failed, [])
         self.mock_proxmox.cluster.sdn.vnets.assert_not_called()
 
+    def test_exclude_patterns_prevent_clearing_aliases(self):
+        """Exclude patterns should skip matching VNets."""
+        mock_vnets = [
+            {"vnet": "RN1", "zone": "CMPCCDC", "alias": "Keep.Me"},
+            {"vnet": "RN2", "zone": "CMPCCDC", "alias": "Clear.Me"},
+        ]
+        self.network_manager.get_vnets = Mock(return_value=mock_vnets)
+
+        cleared, failed = self.network_manager.clear_all_vnet_aliases(exclude=["keep"])
+
+        self.assertEqual(cleared, 1)
+        self.assertEqual(failed, [])
+        self.mock_proxmox.cluster.sdn.vnets.assert_called_once_with("RN2")
+        self.mock_proxmox.cluster.sdn.vnets.return_value.put.assert_called_once_with(
+            zone="CMPCCDC", alias=""
+        )
+
+    def test_exclude_patterns_match_description(self):
+        """Exclude patterns should consider VNet descriptions."""
+        mock_vnets = [
+            {
+                "vnet": "RN3",
+                "zone": "CMPCCDC",
+                "alias": "Clear.Me",
+                "description": "Keep Label",
+            },
+            {"vnet": "RN4", "zone": "CMPCCDC", "alias": "Clear.Also"},
+        ]
+        self.network_manager.get_vnets = Mock(return_value=mock_vnets)
+
+        cleared, failed = self.network_manager.clear_all_vnet_aliases(exclude=["keep"])
+
+        self.assertEqual(cleared, 1)
+        self.assertEqual(failed, [])
+        called_vnets = [
+            args[0] for args, _ in self.mock_proxmox.cluster.sdn.vnets.call_args_list
+        ]
+        self.assertEqual(called_vnets, ["RN4"])
+
 
 class TestPoolManager(unittest.TestCase):
     """Test cases for pool matching and deletion safeguards."""
