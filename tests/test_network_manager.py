@@ -66,7 +66,9 @@ class TestUsernameMatching(unittest.TestCase):
         self.assertEqual(result, "RN2", "Should match Sam.Royal (case insensitive)")
 
         result = self.network_manager.get_vnet_for_user("nilufer.gungor")
-        self.assertEqual(result, "RN3", "Should match NiLuFeR.GuNgOr (case insensitive)")
+        self.assertEqual(
+            result, "RN3", "Should match NiLuFeR.GuNgOr (case insensitive)"
+        )
 
     def test_whitespace_handling(self):
         """Test whitespace handling in aliases and usernames."""
