@@ -23,11 +23,31 @@ import tomli
 import urllib.parse
 import requests
 import urllib3
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from proxmoxer import ProxmoxAPI
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def build_resource_prefix(username: str, club: Optional[str] = None) -> str:
+    """
+    Build the standard resource prefix using optional club identifier.
+
+    Args:
+        username: Base username (without realm)
+        club: Optional club identifier (e.g., 'CCDC')
+
+    Returns:
+        Combined prefix such as 'CCDC/jane.doe' or 'jane.doe' if no club provided.
+    """
+    username_clean = (username or "").strip()
+    club_clean = (club or "").strip()
+
+    if club_clean:
+        return f"{club_clean.upper()}/{username_clean}"
+
+    return username_clean
 
 
 def load_secrets(secrets_path: Optional[str] = None) -> Dict[str, Any]:
@@ -606,6 +626,54 @@ class NetworkManager:
         self.proxmox = proxmox
         self.secrets = secrets or load_secrets()
 
+    @staticmethod
+    def _normalize_identity(username: str, club: Optional[str] = None) -> Optional[str]:
+        """
+        Normalize usernames (and optional club identifiers) for comparisons.
+
+        Returns lowercase strings suitable for equality checks or None if username empty.
+        """
+        username_clean = (username or "").strip().lower()
+        if not username_clean:
+            return None
+
+        club_clean = (club or "").strip().lower()
+        if club_clean:
+            return f"{club_clean}/{username_clean}"
+
+        return username_clean
+
+    @staticmethod
+    def _build_alias(username: str, club: Optional[str] = None) -> str:
+        """
+        Build the display alias stored on the VNet (preserves username case, uppercases club).
+        """
+        return build_resource_prefix(username, club)
+
+    @staticmethod
+    def _legacy_identity_variants(
+        username: str, club: Optional[str] = None
+    ) -> List[str]:
+        """
+        Provide legacy identity keys for backward compatibility.
+
+        This currently includes:
+        - Username without club prefix
+        - Club prefixed with hyphen separator (old format)
+        """
+        variants: List[str] = []
+        username_only = NetworkManager._normalize_identity(username)
+        if username_only:
+            variants.append(username_only)
+
+        club_clean = (club or "").strip().lower()
+        username_clean = (username or "").strip().lower()
+
+        if club_clean and username_clean:
+            variants.append(f"{club_clean}-{username_clean}")  # Previous format
+
+        return variants
+
     def get_vnets(self) -> List[Dict[str, Any]]:
         """Get list of all VNets."""
         try:
@@ -614,25 +682,32 @@ class NetworkManager:
             logger.error(f"Failed to get VNets: {e}")
             return []
 
-    def get_vnet_for_user(self, username: str) -> Optional[str]:
+    def get_vnet_for_user(
+        self, username: str, club: Optional[str] = None
+    ) -> Optional[str]:
         """
         Get the VNet assigned to a specific user.
 
         Args:
             username: Username to look up
+            club: Optional club identifier to disambiguate users belonging to multiple clubs
 
         Returns:
             VNet name if found, None otherwise
         """
         try:
             vnets = self.get_vnets()
-            # Normalize username for comparison (lowercase and strip whitespace)
-            normalized_username = username.strip().lower()
+            target_key = self._normalize_identity(username, club)
 
             # Don't match empty usernames
-            if not normalized_username:
+            if not target_key:
                 logger.debug("Empty username provided, returning None")
                 return None
+
+            # When club is supplied, also keep track of the legacy alias for fallback
+            fallback_keys: List[str] = []
+            if club is not None:
+                fallback_keys = self._legacy_identity_variants(username, club)
 
             for vnet in vnets:
                 alias = vnet.get("alias", "")
@@ -640,13 +715,26 @@ class NetworkManager:
                 normalized_alias = alias.strip().lower()
 
                 # Use exact match after normalization to avoid partial matches
-                if normalized_alias and normalized_alias == normalized_username:
+                if normalized_alias and normalized_alias == target_key:
                     vnet_name = vnet.get("vnet")
                     logger.debug(
                         f"Found VNet '{vnet_name}' for user '{username}' "
                         f"(matched alias '{alias}')"
                     )
                     return vnet_name
+
+            # Fallback to legacy alias if requested and available
+            if fallback_keys:
+                for vnet in vnets:
+                    alias = vnet.get("alias", "")
+                    normalized_alias = alias.strip().lower()
+                    if normalized_alias and normalized_alias in fallback_keys:
+                        vnet_name = vnet.get("vnet")
+                        logger.debug(
+                            f"Found legacy VNet '{vnet_name}' for user '{username}' "
+                            f"(matched alias '{alias}')"
+                        )
+                        return vnet_name
 
             logger.debug(f"No VNet found for user {username}")
             return None
@@ -699,7 +787,7 @@ class NetworkManager:
             return False
 
     def ensure_user_vnet(
-        self, username: str, zone: Optional[str] = None
+        self, username: str, zone: Optional[str] = None, club: Optional[str] = None
     ) -> Optional[str]:
         """
         Ensure a VNet exists for a user.
@@ -712,6 +800,7 @@ class NetworkManager:
         Args:
             username: Username to create VNet for
             zone: SDN zone to create VNet in (defaults to value from infra.toml)
+            club: Optional club identifier to scope the VNet
 
         Returns:
             VNet name if successful, None otherwise
@@ -730,12 +819,17 @@ class NetworkManager:
             vnets = self.get_vnets()
 
             # Normalize username for comparison (lowercase and strip whitespace)
-            normalized_username = username.strip().lower()
+            normalized_target = self._normalize_identity(username, club)
 
             # Don't proceed with empty usernames
-            if not normalized_username:
+            if not normalized_target:
                 logger.error("Empty username provided to ensure_user_vnet")
                 return None
+
+            desired_alias = self._build_alias(username, club)
+            fallback_keys: List[str] = []
+            if club is not None:
+                fallback_keys = self._legacy_identity_variants(username, club)
 
             # First check if a VNet already exists for this user (by checking alias field)
             for vnet in vnets:
@@ -744,11 +838,18 @@ class NetworkManager:
                 normalized_alias = alias.strip().lower()
 
                 # Use exact match after normalization to avoid partial matches
-                if normalized_alias and normalized_alias == normalized_username:
+                if normalized_alias and normalized_alias == normalized_target:
                     existing_vnet_name = vnet.get("vnet")
                     logger.info(
-                        f"VNet '{existing_vnet_name}' already exists for user {username} "
-                        f"(matched alias '{alias}')"
+                        f"VNet '{existing_vnet_name}' already exists for user {username}"
+                        f"{f' (club {club})' if club else ''} (matched alias '{alias}')"
+                    )
+                    return existing_vnet_name
+                if normalized_alias and normalized_alias in fallback_keys:
+                    existing_vnet_name = vnet.get("vnet")
+                    logger.info(
+                        f"VNet '{existing_vnet_name}' already exists for user {username}"
+                        f"{f' (club {club})' if club else ''} using legacy alias '{alias}'"
                     )
                     return existing_vnet_name
 
@@ -781,9 +882,10 @@ class NetworkManager:
                     # Delete and recreate the VNet with the new alias
                     # This is the most reliable way to update the alias in Proxmox
                     if self.delete_vnet(vnet_name):
-                        if self.create_vnet(vnet_name, zone, username):
+                        if self.create_vnet(vnet_name, zone, desired_alias):
                             logger.info(
                                 f"Assigned existing VNet '{vnet_name}' to user {username}"
+                                f"{f' (club {club})' if club else ''}"
                             )
                             return vnet_name
                         else:
@@ -808,9 +910,10 @@ class NetworkManager:
                 vnet_name = f"{vnet_prefix}{i}"
                 if vnet_name not in existing_vnet_names:
                     # Create the new VNet with username in alias field
-                    if self.create_vnet(vnet_name, zone, username):
+                    if self.create_vnet(vnet_name, zone, desired_alias):
                         logger.info(
                             f"Created new VNet '{vnet_name}' for user {username}"
+                            f"{f' (club {club})' if club else ''}"
                         )
                         return vnet_name
                     else:
@@ -947,6 +1050,77 @@ class PoolManager:
 
         return self.create_pool(pool_name, comment or "Range pool for users")
 
+    def delete_pool(self, pool_name: str) -> bool:
+        """
+        Delete a pool by name.
+
+        Args:
+            pool_name: Pool identifier to delete
+
+        Returns:
+            True if deletion succeeded, False otherwise
+        """
+        try:
+            self.proxmox.pools(pool_name).delete()
+            logger.info(f"Deleted pool: {pool_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete pool {pool_name}: {e}")
+            return False
+
+    def find_pools_by_pattern(self, pattern: str) -> List[str]:
+        """
+        Find pool IDs that match a regex pattern, excluding protected pools.
+
+        Args:
+            pattern: Regex pattern to evaluate against pool IDs
+
+        Returns:
+            List of matching pool IDs (protected pools omitted)
+        """
+        regex = re.compile(pattern)
+        matches: List[str] = []
+        for pool in self.get_pools():
+            pool_id = pool.get("poolid", "")
+            if not pool_id:
+                continue
+
+            if not regex.search(pool_id):
+                continue
+
+            # Skip protected pools containing 'prod' or 'infra'
+            lowered = pool_id.lower()
+            if "prod" in lowered or "infra" in lowered:
+                logger.debug(f"Skipping protected pool {pool_id}")
+                continue
+
+            matches.append(pool_id)
+        return matches
+
+    def nuke_pools_by_pattern(
+        self, pattern: str, dry_run: bool = False
+    ) -> Tuple[List[str], List[str]]:
+        """
+        Delete pools that match a regex pattern, with safety exclusions.
+
+        Args:
+            pattern: Regex pattern to match pool IDs
+            dry_run: If True, do not delete pools
+
+        Returns:
+            Tuple of (matched pool IDs, successfully deleted pool IDs)
+        """
+        matches = self.find_pools_by_pattern(pattern)
+        if dry_run:
+            return matches, []
+
+        deleted: List[str] = []
+        for pool_id in matches:
+            if self.delete_pool(pool_id):
+                deleted.append(pool_id)
+
+        return matches, deleted
+
 
 class RangeManager:
     """
@@ -977,7 +1151,10 @@ class RangeManager:
         self.pools = PoolManager(self.proxmox)
 
     def user_has_complete_range(
-        self, username: str, pool_suffix: Optional[str] = None
+        self,
+        username: str,
+        pool_suffix: Optional[str] = None,
+        club: Optional[str] = None,
     ) -> bool:
         """
         Check if a user already has a complete range setup.
@@ -995,6 +1172,8 @@ class RangeManager:
             True if user has complete setup, False otherwise
         """
         try:
+            resource_prefix = build_resource_prefix(username, club)
+
             # Load infrastructure configuration if pool_suffix not provided
             if pool_suffix is None:
                 infra_config = load_infra_config()
@@ -1004,24 +1183,33 @@ class RangeManager:
             else:
                 vyos_suffix = "-range-vyos"  # Default fallback
 
-            pool_name = f"{username}{pool_suffix}"
-            vyos_name = f"{username}{vyos_suffix}"
+            pool_name = f"{resource_prefix}{pool_suffix}"
+            vyos_name = f"{resource_prefix}{vyos_suffix}"
 
             # Check if pool exists
             if not self.pools.pool_exists(pool_name):
-                logger.debug(f"Pool {pool_name} doesn't exist for {username}")
+                logger.debug(
+                    f"Pool {pool_name} doesn't exist for {username}"
+                    f"{f' (club {club})' if club else ''}"
+                )
                 return False
 
             # Check if VNet exists (this also returns the name if it exists)
-            vnet_name = self.networks.ensure_user_vnet(username)
+            vnet_name = self.networks.ensure_user_vnet(username, club=club)
             if not vnet_name:
-                logger.debug(f"VNet doesn't exist for {username}")
+                logger.debug(
+                    f"VNet doesn't exist for {username}"
+                    f"{f' (club {club})' if club else ''}"
+                )
                 return False
 
             # Check if VyOS gateway VM exists
             vyos_vm = self.vms.find_vm_by_name(vyos_name)
             if not vyos_vm:
-                logger.debug(f"VyOS gateway VM {vyos_name} doesn't exist")
+                logger.debug(
+                    f"VyOS gateway VM {vyos_name} doesn't exist for {username}"
+                    f"{f' (club {club})' if club else ''}"
+                )
                 return False
 
             # Verify the VM is in the correct pool
@@ -1039,11 +1227,17 @@ class RangeManager:
                 logger.warning(f"Could not verify pool for VM {vmid}: {e}")
                 # Don't fail completely if we can't check the pool, but log it
 
-            logger.info(f"User {username} already has complete range setup")
+            logger.info(
+                f"User {username} already has complete range setup"
+                f"{f' for club {club}' if club else ''}"
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Error checking complete range for {username}: {e}")
+            logger.error(
+                f"Error checking complete range for {username}"
+                f"{f' (club {club})' if club else ''}: {e}"
+            )
             return False
 
     def setup_user_range(
@@ -1051,6 +1245,7 @@ class RangeManager:
         username: str,
         base_vmid: Optional[int] = None,
         pool_suffix: Optional[str] = None,
+        club: Optional[str] = None,
     ) -> bool:
         """
         Set up a complete range environment for a user.
@@ -1066,11 +1261,14 @@ class RangeManager:
             username: Username (without realm)
             base_vmid: Base VM ID to clone from (defaults to value from infra.toml)
             pool_suffix: Suffix for the pool name (defaults to value from infra.toml)
+            club: Optional club identifier to scope resources
 
         Returns:
             True if successful, False otherwise
         """
         try:
+            resource_prefix = build_resource_prefix(username, club)
+
             # Load infrastructure configuration
             infra_config = load_infra_config()
             naming_config = infra_config.get("naming", {})
@@ -1088,20 +1286,20 @@ class RangeManager:
                 return False
 
             # Check if user already has complete range setup
-            if self.user_has_complete_range(username, pool_suffix):
+            if self.user_has_complete_range(username, pool_suffix, club):
                 logger.info(
-                    f"User {username} already has complete range setup, skipping"
+                    f"User {username}{f' (club {club})' if club else ''} already has complete range setup, skipping"
                 )
                 return True
 
-            pool_name = f"{username}{pool_suffix}"
+            pool_name = f"{resource_prefix}{pool_suffix}"
 
             # Ensure pool exists
             if not self.pools.ensure_pool(pool_name):
                 return False
 
             # Ensure VNet exists
-            vnet_name = self.networks.ensure_user_vnet(username)
+            vnet_name = self.networks.ensure_user_vnet(username, club=club)
             if not vnet_name:
                 logger.error(f"Failed to ensure VNet for {username}")
                 return False
@@ -1109,7 +1307,7 @@ class RangeManager:
             # Get next available VM ID
             new_vmid = self.proxmox.cluster.nextid.get()
             vyos_suffix = naming_config.get("vyos_suffix", "-range-vyos")
-            clone_name = f"{username}{vyos_suffix}"
+            clone_name = f"{resource_prefix}{vyos_suffix}"
 
             # Clone the gateway VM
             success, _ = self.vms.clone_vm(base_vmid, new_vmid, clone_name, pool_name)
@@ -1122,11 +1320,17 @@ class RangeManager:
             # Set user permissions
             self._set_user_permissions(f"{username}@ad", pool_name, new_vmid)
 
-            logger.info(f"Successfully set up range for {username}@ad")
+            logger.info(
+                f"Successfully set up range for {username}@ad"
+                f"{f' (club {club})' if club else ''}"
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Failed to setup range for {username}: {e}")
+            logger.error(
+                f"Failed to setup range for {username}"
+                f"{f' (club {club})' if club else ''}: {e}"
+            )
             return False
 
     def configure_gateway_networking(self, vmid: int, vnet_name: str):

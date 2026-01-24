@@ -24,7 +24,12 @@ import os
 from typing import List, Optional
 import logging
 
-from rangemgr import RangeManager, load_secrets, load_infra_config
+from rangemgr import (
+    RangeManager,
+    load_secrets,
+    load_infra_config,
+    build_resource_prefix,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -143,6 +148,9 @@ def setup_network_commands(subparsers):
     ensure_parser.add_argument(
         "--zone", default="CMPCCDC", help="SDN zone (default: CMPCCDC)"
     )
+    ensure_parser.add_argument(
+        "--club", help="Optional club identifier to scope the VNet"
+    )
 
     # Ensure VNets for all AD users
     ensure_all_parser = net_subparsers.add_parser(
@@ -150,6 +158,9 @@ def setup_network_commands(subparsers):
     )
     ensure_all_parser.add_argument(
         "--zone", default="CMPCCDC", help="SDN zone (default: CMPCCDC)"
+    )
+    ensure_all_parser.add_argument(
+        "--club", help="Optional club identifier to scope the VNets"
     )
 
     # Pre-create VNets
@@ -173,6 +184,24 @@ def setup_network_commands(subparsers):
 
     # Reload SDN
     reload_parser = net_subparsers.add_parser("reload", help="Reload SDN configuration")
+
+
+def setup_pool_commands(subparsers):
+    """Set up pool management commands."""
+    pool_parser = subparsers.add_parser("pool", help="Pool management operations")
+    pool_subparsers = pool_parser.add_subparsers(
+        dest="pool_command", help="Pool commands"
+    )
+
+    nuke_parser = pool_subparsers.add_parser(
+        "nuke", help="Delete pools matching a regex pattern"
+    )
+    nuke_parser.add_argument("pattern", help="Regex pattern to match pool IDs")
+    nuke_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without making changes",
+    )
 
 
 def setup_range_commands(subparsers):
@@ -213,6 +242,10 @@ def setup_range_commands(subparsers):
         action="store_true",
         help="Use rtl8139 network interface type instead of e1000 (for retro Windows VMs)",
     )
+    setup_parser.add_argument(
+        "--club",
+        help="Optional club identifier (e.g., CCDC) to prefix range resources",
+    )
 
     # Setup ranges for all AD users
     setup_all_parser = range_subparsers.add_parser(
@@ -244,6 +277,10 @@ def setup_range_commands(subparsers):
         "--retrowin",
         action="store_true",
         help="Use rtl8139 network interface type instead of e1000 (for retro Windows VMs)",
+    )
+    setup_all_parser.add_argument(
+        "--club",
+        help="Optional club identifier (e.g., CCDC) to prefix range resources",
     )
 
 
@@ -361,9 +398,12 @@ def handle_network_commands(args, manager: RangeManager):
             print(manager.users.get_ad_user_error_message(args.username))
             return
 
-        vnet_name = manager.networks.ensure_user_vnet(args.username, args.zone)
+        vnet_name = manager.networks.ensure_user_vnet(
+            args.username, args.zone, args.club
+        )
         if vnet_name:
-            print(f"VNet {vnet_name} ensured for user {args.username}@ad")
+            club_suffix = f" (club {args.club})" if args.club else ""
+            print(f"VNet {vnet_name} ensured for user {args.username}@ad{club_suffix}")
         else:
             print(f"Failed to ensure VNet for user {args.username}@ad")
 
@@ -385,9 +425,12 @@ def handle_network_commands(args, manager: RangeManager):
                 continue
 
             username = userid.split("@")[0]
-            vnet_name = manager.networks.ensure_user_vnet(username, args.zone)
+            vnet_name = manager.networks.ensure_user_vnet(
+                username, args.zone, args.club
+            )
             if vnet_name:
-                print(f"Ensured VNet {vnet_name} for {username}")
+                club_suffix = f" (club {args.club})" if args.club else ""
+                print(f"Ensured VNet {vnet_name} for {username}{club_suffix}")
                 created_count += 1
             else:
                 print(f"Failed to ensure VNet for {username}")
@@ -457,17 +500,53 @@ def handle_network_commands(args, manager: RangeManager):
             print("Failed to reload SDN configuration")
 
 
+def handle_pool_commands(args, manager: RangeManager):
+    """Handle pool management commands."""
+    if args.pool_command == "nuke":
+        matches, deleted = manager.pools.nuke_pools_by_pattern(
+            args.pattern, dry_run=args.dry_run
+        )
+
+        if args.dry_run:
+            print(
+                f"Would delete {len(matches)} pools "
+                "(protected pools containing 'prod' or 'infra' are skipped automatically)"
+            )
+            for pool_id in matches:
+                print(f"  - {pool_id}")
+            if not matches:
+                print("No pools matched the provided pattern.")
+        else:
+            failed = [pool_id for pool_id in matches if pool_id not in deleted]
+
+            print(
+                f"Deleted {len(deleted)} pools "
+                "(protected pools containing 'prod' or 'infra' are skipped automatically)"
+            )
+            for pool_id in deleted:
+                print(f"  - {pool_id}")
+
+            if failed:
+                print("Failed to delete the following pools (see logs for details):")
+                for pool_id in failed:
+                    print(f"  - {pool_id}")
+            if not matches:
+                print("No pools matched the provided pattern.")
+
+
 def handle_range_commands(args, manager: RangeManager):
     """Handle high-level range management commands."""
     if args.range_command == "setup":
         # First, set up the gateway VM and infrastructure
         success = manager.setup_user_range(
-            args.username, args.base_vmid, args.pool_suffix
+            args.username, args.base_vmid, args.pool_suffix, club=args.club
         )
 
         if not success:
             print(f"Failed to set up gateway for {args.username}")
             return
+
+        resource_prefix = build_resource_prefix(args.username, args.club)
 
         # Clone additional VMs if specified
         if args.vmids:
@@ -482,12 +561,12 @@ def handle_range_commands(args, manager: RangeManager):
                 print(f"Error parsing VMIDs: {e}")
                 return
 
-            pool_name = f"{args.username}{args.pool_suffix}"
+            pool_name = f"{resource_prefix}{args.pool_suffix}"
             all_vms_success = True
 
             for base_vmid in additional_vmids:
                 new_vmid = manager.proxmox.cluster.nextid.get()
-                clone_name = f"{args.username}-range-{base_vmid}"
+                clone_name = f"{resource_prefix}-range-{base_vmid}"
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
                 vm_success, template_mac_addresses = manager.vms.clone_vm(
@@ -500,7 +579,9 @@ def handle_range_commands(args, manager: RangeManager):
 
                 if vm_success:
                     # Configure networking with MAC preservation if requested
-                    vnet_name = manager.networks.get_vnet_for_user(args.username)
+                    vnet_name = manager.networks.get_vnet_for_user(
+                        args.username, club=args.club
+                    )
                     if vnet_name:
                         manager.configure_vm_networking(
                             new_vmid,
@@ -525,12 +606,17 @@ def handle_range_commands(args, manager: RangeManager):
                     print(f"  ✗ Failed to clone VM {base_vmid}")
                     all_vms_success = False
 
+            club_suffix = f" (club {args.club})" if args.club else ""
+
             if all_vms_success:
-                print(f"Successfully set up complete range for {args.username}")
+                print(
+                    f"Successfully set up complete range for {args.username}{club_suffix}"
+                )
             else:
-                print(f"Partially set up range for {args.username}")
+                print(f"Partially set up range for {args.username}{club_suffix}")
         else:
-            print(f"Successfully set up range for {args.username}")
+            club_suffix = f" (club {args.club})" if args.club else ""
+            print(f"Successfully set up range for {args.username}{club_suffix}")
 
     elif args.range_command == "setup-all":
         # Sync AD realm first
@@ -572,7 +658,7 @@ def handle_range_commands(args, manager: RangeManager):
 
             # First, set up the gateway VM and infrastructure
             success = manager.setup_user_range(
-                username, args.base_vmid, args.pool_suffix
+                username, args.base_vmid, args.pool_suffix, club=args.club
             )
 
             if not success:
@@ -580,12 +666,13 @@ def handle_range_commands(args, manager: RangeManager):
                 continue
 
             # Clone additional VMs if specified
-            pool_name = f"{username}{args.pool_suffix}"
+            resource_prefix = build_resource_prefix(username, args.club)
+            pool_name = f"{resource_prefix}{args.pool_suffix}"
             all_vms_success = True
 
             for base_vmid in additional_vmids:
                 new_vmid = manager.proxmox.cluster.nextid.get()
-                clone_name = f"{username}-range-{base_vmid}"
+                clone_name = f"{resource_prefix}-range-{base_vmid}"
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
                 vm_success, template_mac_addresses = manager.vms.clone_vm(
@@ -596,7 +683,7 @@ def handle_range_commands(args, manager: RangeManager):
                     preserve_mac=args.preserve_mac,
                 )
 
-                vnet_name = manager.networks.get_vnet_for_user(username)
+                vnet_name = manager.networks.get_vnet_for_user(username, club=args.club)
                 if vnet_name:
                     manager.configure_vm_networking(
                         new_vmid,
@@ -622,12 +709,15 @@ def handle_range_commands(args, manager: RangeManager):
                     print(f"  ✗ Failed to clone VM {base_vmid}")
                     all_vms_success = False
 
+            club_suffix = f" (club {args.club})" if args.club else ""
+
             if all_vms_success:
-                print(f"✓ Successfully set up complete range for {username}")
-                setup_count += 1
+                print(
+                    f"✓ Successfully set up complete range for {username}{club_suffix}"
+                )
             else:
-                print(f"⚠ Partially set up range for {username}")
-                setup_count += 1
+                print(f"⚠ Partially set up range for {username}{club_suffix}")
+            setup_count += 1
 
         print(f"Set up ranges for {setup_count} users")
 
@@ -644,6 +734,7 @@ Examples:
   %(prog)s vm nuke ".*test.*" --dry-run
   %(prog)s user validate john.doe
   %(prog)s user list --realm ad
+  %(prog)s pool nuke ".*-range" --dry-run
   %(prog)s network ensure-all
   %(prog)s range setup john.doe --base-vmid 150
         """,
@@ -660,6 +751,7 @@ Examples:
     setup_vm_commands(subparsers)
     setup_user_commands(subparsers)
     setup_network_commands(subparsers)
+    setup_pool_commands(subparsers)
     setup_range_commands(subparsers)
 
     args = parser.parse_args()
@@ -685,6 +777,8 @@ Examples:
             handle_user_commands(args, manager)
         elif args.command == "network":
             handle_network_commands(args, manager)
+        elif args.command == "pool":
+            handle_pool_commands(args, manager)
         elif args.command == "range":
             handle_range_commands(args, manager)
 

@@ -1,202 +1,45 @@
-# Proxmox Range Management System
+# Proxmox Range Management
 
-A Python Flask web interface for managing Proxmox VMs in competitive cyber training environments. This system provides administrators and users with tools to clone VMs, manage permissions, and integrate with Active Directory authentication.
+Small-but-mighty toolkit for running competition “ranges” on Proxmox. It lets staff spin up user pools, clone VMs, wire SDN VNets, and clean up leftovers without touching the Proxmox UI.
 
-## Features
+## TL;DR
+- **Everything in one place**: `rangemgr.py` powers the CLI, web UI, and TUI.
+- **Multi-club aware**: resources use the `CLUB/username-range` pattern so teams stay isolated.
+- **Safe destructive ops**: dry-run modes and automatic `prod` / `infra` safeguards guard your cluster.
+- **Works with AD**: validates `@ad` users before building their range.
 
-- **VM Cloning**: Clone template VMs for individual users or bulk operations
-- **User Management**: Integration with Active Directory via Proxmox realm
-- **Network Configuration**: Automatic assignment of user-specific virtual networks
-- **Permission Management**: Automated ACL configuration for VM access
-- **Web Interface**: Simple Flask-based UI for self-service operations
+## Quick Start
+1. Create a virtualenv, then `pip install -r requirements.txt`.
+2. Copy `secrets.toml.example` to `secrets.toml` and fill in your Proxmox + AD details.
+3. Run `python range_cli.py --help` to browse commands.
 
-## Architecture
-
-- **Flask Web Application** (`web.py`): Main interface with multiple endpoints
-- **Range Management Library** (`rangemgr.py`): Unified API for Proxmox operations
-- **Command Line Interface** (`range_cli.py`): CLI tool for administrative tasks
-- **TUI Application** (`tui.py`): Interactive menu-driven interface
-- **Proxmox API Integration**: Using `proxmoxer` library for cluster management
-- **User Authentication**: Supports both AD realm and local PVE users
-- **Configuration Management**: TOML-based configuration files
-
-## Setup
-
-### Prerequisites
-
-- Python 3.8 or higher
-- Access to a Proxmox VE cluster
-- Administrative credentials for Proxmox
-
-### Installation
-
-1. Clone the repository:
+## Common CLI One-Liners
 ```bash
-git clone https://github.com/champcybersec/range.git
-cd range
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Create configuration file:
-```bash
-cp secrets.toml.example secrets.toml
-# Edit secrets.toml with your Proxmox credentials
-```
-
-4. Run the application:
-```bash
-python web.py
-```
-
-### Command Line Tools
-
-The system provides several command-line tools for administrative tasks:
-
-#### Range CLI (`range_cli.py`)
-Unified command-line interface for all range management operations:
-
-```bash
-# VM Management
+# VM management
 python range_cli.py vm list --pattern ".*range.*"
-python range_cli.py vm power start ".*windows.*"
-python range_cli.py vm nuke ".*test.*" --dry-run
-python range_cli.py vm nuke-gw  # Delete all gateway VMs
+python range_cli.py vm nuke ".*-wk." --dry-run
 
-# User Management  
-python range_cli.py user list --realm ad
-python range_cli.py user create testuser password123 --realm pve
-python range_cli.py user purge-pve --dry-run
+# Network management
+python range_cli.py network ensure-user matt.compton --club CCDC
+python range_cli.py network ensure-all --club PRAC
 
-# Network Management
-python range_cli.py network list
-python range_cli.py network ensure-user john.doe
-python range_cli.py network ensure-all  # Create VNets for all AD users
+# Pool lifecycle
+python range_cli.py pool nuke ".*-range" --dry-run
 
-# High-level Range Operations
-python range_cli.py range setup john.doe --base-vmid 150
-python range_cli.py range setup-all --skip-admins
+# Full range provisioning
+python range_cli.py range setup matt.compton --base-vmid 150 --club CCDC
+python range_cli.py range setup-all --skip-admins --club PRAC
 ```
 
-#### Interactive TUI (`tui.py`)
-Menu-driven interface for common operations:
-```bash
-python tui.py
-```
+## Naming & Multi-Club Support
+- Pools, VNets, VyOS gateways, and cloned VMs all start with `CLUB/username`.
+- Suffixes stay familiar: `-range`, `-range-vyos`, and `-range-{template}`.
+- Legacy names (`username-range`, `CLUB-username-range`) still resolve, but new assets adopt the slash style automatically.
 
-### Using the rangemgr Library
+## Other Interfaces
+- `web.py`: lightweight Flask UI for quick clones.
+- `tui.py`: menu-driven workflows if you prefer arrow keys.
+- `test_network_manager.py`: unit coverage for the matching logic that protects VNets.
 
-The `rangemgr.py` module can be imported and used in custom scripts:
-
-```python
-from rangemgr import RangeManager, load_secrets
-
-# Initialize the manager
-secrets = load_secrets()
-manager = RangeManager(secrets)
-
-# VM operations
-vms = manager.vms.get_vms()
-manager.vms.nuke_by_pattern(r'.*test.*')
-manager.vms.set_power_by_pattern(r'.*windows.*', 'start')
-
-# User operations  
-users = manager.users.get_users("ad")
-manager.users.create_user("testuser", "password", "pve")
-
-# Network operations
-vnet_name = manager.networks.ensure_user_vnet("john.doe")
-manager.networks.reload_sdn()
-
-# High-level range setup
-success = manager.setup_user_range("john.doe", base_vmid=150)
-```
-
-#### PowerShell Scripts
-The `scripts/` directory contains PowerShell utilities for Active Directory operations:
-- `Create-RangeUsers.ps1`: Bulk user creation and group assignment in Active Directory
-
-The web interface will be available at `http://localhost:7878`
-
-### Configuration
-
-Create `secrets.toml` in the project root with the following structure:
-
-```toml
-[proxmox]
-host = "192.168.3.236"      # Proxmox host (without protocol)
-user = "root@pam"           # Admin user
-password = "your-password"   # Admin password
-verify_ssl = false          # SSL verification (true/false)
-node = "pve"               # Node name
-
-[web]
-admin_password = "changeme"          # Web admin password
-```
-
-## Web Endpoints
-
-- `/` - Home page with navigation
-- `/login` - Admin authentication
-- `/admin` - Administrative dashboard
-- `/clone` - Individual VM cloning with AD integration
-- `/range` - Bulk VM cloning (admin only)
-- `/ensure` - User management helper (admin only)
-
-## Development
-
-### Code Quality
-
-The project uses modern Python practices:
-- Type hints for better IDE support and documentation
-- Comprehensive docstrings for all functions
-- Modern project structure with `pyproject.toml`
-
-### Development Setup
-
-Install development dependencies:
-```bash
-pip install -e ".[dev]"
-```
-
-Run code formatting:
-```bash
-black .
-```
-
-Run linting:
-```bash
-flake8 .
-```
-
-### Scripts
-
-The repository provides three main interfaces:
-
-#### rangemgr.py - Core Library
-Unified Python library with the following components:
-- `RangeManager`: High-level operations for complete range setup
-- `VMManager`: VM lifecycle operations (clone, delete, power control)
-- `UserManager`: User creation, deletion, and management
-- `NetworkManager`: VNet creation and SDN management
-- `PoolManager`: Proxmox pool operations
-
-#### range_cli.py - Command Line Interface
-Modern CLI tool that replaces individual scripts with unified commands:
-- `vm`: VM management (list, power, nuke, clone)
-- `user`: User management (list, create, delete, bulk operations)
-- `network`: Network operations (VNet management, SDN reload)
-- `range`: High-level setup operations
-
-#### PowerShell Scripts Directory
-The `scripts/` directory contains PowerShell utilities for Active Directory operations:
-- `Create-RangeUsers.ps1`: Bulk user creation and group assignment in Active Directory
-
-All individual Python scripts have been consolidated into the unified `range_cli.py` command-line interface.
-
-## License
-
-See LICENSE file for details.
+## Need the Deep Dive?
+All detailed docs, history, migration notes, and contributor guidance live in `.github/copilot-instructions.md`.
