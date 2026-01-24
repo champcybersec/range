@@ -267,6 +267,62 @@ class TestEnsureUserVnet(unittest.TestCase):
         )
 
 
+class TestClearAllVnetAliases(unittest.TestCase):
+    """Tests for clearing VNet aliases."""
+
+    def setUp(self):
+        self.mock_proxmox = MagicMock()
+        self.mock_secrets = {
+            "proxmox": {
+                "host": "test.example.com",
+                "user": "root@pam",
+                "password": "test",
+                "verify_ssl": False,
+                "node": "pve",
+            }
+        }
+        self.network_manager = NetworkManager(self.mock_proxmox, self.mock_secrets)
+
+    def test_skips_non_rn_vnets(self):
+        """Ensure aliases are only cleared for RN-prefixed VNets."""
+        mock_vnets = [
+            {"vnet": "RN1", "zone": "CMPCCDC", "alias": "user.one"},
+            {"vnet": "MG1", "zone": "CMPCCDC", "alias": "user.two"},
+            {"vnet": "RN2", "zone": "CMPCCDC", "alias": "user.three"},
+        ]
+        self.network_manager.get_vnets = Mock(return_value=mock_vnets)
+
+        cleared, failed = self.network_manager.clear_all_vnet_aliases()
+
+        self.assertEqual(cleared, 2)
+        self.assertEqual(failed, [])
+        called_vnets = [
+            args[0] for args, _ in self.mock_proxmox.cluster.sdn.vnets.call_args_list
+        ]
+        self.assertEqual(set(called_vnets), {"RN1", "RN2"})
+        self.assertEqual(self.mock_proxmox.cluster.sdn.vnets.call_count, 2)
+        self.mock_proxmox.cluster.sdn.vnets.return_value.put.assert_has_calls(
+            [
+                call(zone="CMPCCDC", alias=""),
+                call(zone="CMPCCDC", alias=""),
+            ],
+            any_order=False,
+        )
+
+    def test_dry_run_does_not_apply_changes(self):
+        """Dry run should report affected VNets without API calls."""
+        mock_vnets = [
+            {"vnet": "RN10", "zone": "CMPCCDC", "alias": "user.four"},
+        ]
+        self.network_manager.get_vnets = Mock(return_value=mock_vnets)
+
+        cleared, failed = self.network_manager.clear_all_vnet_aliases(dry_run=True)
+
+        self.assertEqual(cleared, 1)
+        self.assertEqual(failed, [])
+        self.mock_proxmox.cluster.sdn.vnets.assert_not_called()
+
+
 class TestPoolManager(unittest.TestCase):
     """Test cases for pool matching and deletion safeguards."""
 

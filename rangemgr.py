@@ -831,12 +831,18 @@ class NetworkManager:
             if not alias:
                 continue
 
-            vnet_name = vnet.get("vnet")
+            vnet_name = (vnet.get("vnet") or "").strip()
             zone = vnet.get("zone")
 
             if not vnet_name or not zone:
                 logger.warning(
                     f"Skipping VNet with insufficient data: name='{vnet_name}', zone='{zone}'"
+                )
+                continue
+
+            if not re.fullmatch(r"RN\d+", vnet_name):
+                logger.info(
+                    f"Skipping unmanaged VNet '{vnet_name}' in zone '{zone}' while clearing aliases"
                 )
                 continue
 
