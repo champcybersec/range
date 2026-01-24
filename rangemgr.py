@@ -50,6 +50,32 @@ def build_resource_prefix(username: str, club: Optional[str] = None) -> str:
     return username_clean
 
 
+_DNS_SANITIZE_PATTERN = re.compile(r"[^A-Za-z0-9\-\.]+")
+
+
+def build_dns_safe_name(*parts: str) -> str:
+    """
+    Build a DNS-safe name by combining parts and normalizing disallowed characters.
+
+    Args:
+        *parts: Substrings to combine into a DNS-safe label.
+
+    Returns:
+        Lowercase DNS-safe string where invalid characters are replaced with hyphens.
+
+    Raises:
+        ValueError: If the resulting name would be empty.
+    """
+    combined = "-".join(part.strip() for part in parts if part and part.strip())
+    sanitized = _DNS_SANITIZE_PATTERN.sub("-", combined)
+    sanitized = re.sub(r"-{2,}", "-", sanitized).strip("-.")
+
+    if not sanitized:
+        raise ValueError("Cannot build DNS-safe name from empty parts")
+
+    return sanitized.lower()
+
+
 def load_secrets(secrets_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load configuration secrets from secrets.toml file.
@@ -786,6 +812,53 @@ class NetworkManager:
             logger.error(f"Failed to delete VNet {vnet_name}: {e}")
             return False
 
+    def clear_all_vnet_aliases(self, dry_run: bool = False) -> Tuple[int, List[str]]:
+        """
+        Clear alias/description labels from all VNets.
+
+        Args:
+            dry_run: If True, logs planned changes without applying them.
+
+        Returns:
+            Tuple containing (count of VNets processed, list of VNets that failed to update).
+        """
+        vnets = self.get_vnets()
+        cleared_count = 0
+        failed: List[str] = []
+
+        for vnet in vnets:
+            alias = (vnet.get("alias") or "").strip()
+            if not alias:
+                continue
+
+            vnet_name = vnet.get("vnet")
+            zone = vnet.get("zone")
+
+            if not vnet_name or not zone:
+                logger.warning(
+                    f"Skipping VNet with insufficient data: name='{vnet_name}', zone='{zone}'"
+                )
+                continue
+
+            if dry_run:
+                logger.info(
+                    f"[DRYRUN] Would clear alias '{alias}' from VNet '{vnet_name}'"
+                )
+                cleared_count += 1
+                continue
+
+            try:
+                self.proxmox.cluster.sdn.vnets(vnet_name).put(zone=zone, alias="")
+                logger.info(
+                    f"Cleared alias '{alias}' from VNet '{vnet_name}' in zone '{zone}'"
+                )
+                cleared_count += 1
+            except Exception as e:
+                logger.error(f"Failed to clear alias for VNet '{vnet_name}': {e}")
+                failed.append(vnet_name)
+
+        return cleared_count, failed
+
     def ensure_user_vnet(
         self, username: str, zone: Optional[str] = None, club: Optional[str] = None
     ) -> Optional[str]:
@@ -1184,7 +1257,7 @@ class RangeManager:
                 vyos_suffix = "-range-vyos"  # Default fallback
 
             pool_name = f"{resource_prefix}{pool_suffix}"
-            vyos_name = f"{resource_prefix}{vyos_suffix}"
+            vyos_name = build_dns_safe_name(resource_prefix, vyos_suffix)
 
             # Check if pool exists
             if not self.pools.pool_exists(pool_name):
@@ -1307,7 +1380,7 @@ class RangeManager:
             # Get next available VM ID
             new_vmid = self.proxmox.cluster.nextid.get()
             vyos_suffix = naming_config.get("vyos_suffix", "-range-vyos")
-            clone_name = f"{resource_prefix}{vyos_suffix}"
+            clone_name = build_dns_safe_name(resource_prefix, vyos_suffix)
 
             # Clone the gateway VM
             success, _ = self.vms.clone_vm(base_vmid, new_vmid, clone_name, pool_name)

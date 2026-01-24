@@ -29,6 +29,7 @@ from rangemgr import (
     load_secrets,
     load_infra_config,
     build_resource_prefix,
+    build_dns_safe_name,
 )
 
 # Configure logging
@@ -184,6 +185,16 @@ def setup_network_commands(subparsers):
 
     # Reload SDN
     reload_parser = net_subparsers.add_parser("reload", help="Reload SDN configuration")
+
+    # Clear VNet aliases
+    clear_parser = net_subparsers.add_parser(
+        "clear-labels", help="Remove alias/description labels from all VNets"
+    )
+    clear_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show which VNets would be cleared without making changes",
+    )
 
 
 def setup_pool_commands(subparsers):
@@ -492,6 +503,18 @@ def handle_network_commands(args, manager: RangeManager):
         elif created_count == 0:
             print("No VNets created, skipping SDN reload")
 
+    elif args.net_command == "clear-labels":
+        cleared, failed = manager.networks.clear_all_vnet_aliases(args.dry_run)
+
+        if args.dry_run:
+            print(f"Would clear labels from {cleared} VNets")
+        else:
+            print(f"Cleared labels from {cleared} VNets")
+            if failed:
+                print("Failed to clear labels from the following VNets (see logs):")
+                for vnet_name in failed:
+                    print(f"  - {vnet_name}")
+
     elif args.net_command == "reload":
         success = manager.networks.reload_sdn()
         if success:
@@ -566,7 +589,7 @@ def handle_range_commands(args, manager: RangeManager):
 
             for base_vmid in additional_vmids:
                 new_vmid = manager.proxmox.cluster.nextid.get()
-                clone_name = f"{resource_prefix}-range-{base_vmid}"
+                clone_name = build_dns_safe_name(resource_prefix, f"range-{base_vmid}")
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
                 vm_success, template_mac_addresses = manager.vms.clone_vm(
@@ -672,7 +695,7 @@ def handle_range_commands(args, manager: RangeManager):
 
             for base_vmid in additional_vmids:
                 new_vmid = manager.proxmox.cluster.nextid.get()
-                clone_name = f"{resource_prefix}-range-{base_vmid}"
+                clone_name = build_dns_safe_name(resource_prefix, f"range-{base_vmid}")
 
                 print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
                 vm_success, template_mac_addresses = manager.vms.clone_vm(
