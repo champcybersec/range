@@ -11,8 +11,10 @@ pool_suffix = "-range"
 vnet_prefix = "RN"
 vnet_zone = "CMPCCDC"
 
-# VyOS gateway naming: {username} + vyos_suffix
-vyos_suffix = "-range-vyos"
+# Gateway naming defaults to: <club>-range-gateway-<username>
+# gateway_label takes precedence; vyos_suffix is kept for backward compatibility.
+gateway_label = "range-gateway"
+vyos_suffix = "range-gateway"
 
 [networking]
 # Default VyOS gateway template VMID

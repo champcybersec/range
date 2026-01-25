@@ -72,7 +72,8 @@ def setup_vm_commands(subparsers):
 
     # Nuke gateway VMs specifically
     nuke_gw_parser = vm_subparsers.add_parser(
-        "nuke-gw", help="Delete all gateway VMs (ending in -range-gw)"
+        "nuke-gw",
+        help="Delete all gateway VMs (legacy '-range-gw' or new '-range-gateway')",
     )
     nuke_gw_parser.add_argument(
         "--dry-run", action="store_true", help="Show what would be deleted"
@@ -333,7 +334,7 @@ def handle_vm_commands(args, manager: RangeManager):
 
     elif args.vm_command == "nuke-gw":
         if args.dry_run:
-            vms = manager.vms.find_vms_by_suffix("-range-gw")
+            vms = manager.vms.find_vms_by_pattern(r".*-range-gw(?:ateway)?$")
             print(f"Would delete {len(vms)} gateway VMs:")
             for vm in vms:
                 print(f"  - {vm['vmid']} ({vm.get('name', 'Unknown')})")

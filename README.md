@@ -32,8 +32,9 @@ python range_cli.py range setup-all --skip-admins --club PRAC
 ```
 
 ## Naming & Multi-Club Support
-- Pools, VNets, VyOS gateways, and cloned VMs all start with `CLUB/username`.
-- Suffixes stay familiar: `-range`, `-range-vyos`, and `-range-{template}`.
+- Pools and VNets still derive from the `CLUB/username` resource prefix.
+- Gateway VMs now normalize to `club-range-gateway-username` (legacy `range-vyos` names remain detectable).
+- Template clones adopt `first.last-club-template-name`, making it easy to bulk delete by club or template.
 - Legacy names (`username-range`, `CLUB-username-range`) still resolve, but new assets adopt the slash style automatically.
 
 ## Other Interfaces

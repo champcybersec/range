@@ -178,6 +178,45 @@ def build_vm_clone_name(
     return build_dns_safe_name(username, club, template_label)
 
 
+def build_gateway_clone_name(
+    username: str,
+    club: Optional[str] = None,
+    naming_config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Build the standard gateway VM name using optional club context.
+
+    Args:
+        username: Base username without realm
+        club: Optional club identifier (e.g., 'CCDC')
+        naming_config: Optional naming configuration (e.g., from infra.toml)
+
+    Returns:
+        DNS-safe gateway VM name. Pattern defaults to:
+            <club>-range-gateway-<username>
+        if a club is provided, otherwise:
+            range-gateway-<username>
+    """
+    label = "range-gateway"
+    if naming_config:
+        candidate = (
+            naming_config.get("gateway_label")
+            or naming_config.get("gateway_name")
+            or naming_config.get("vyos_suffix")
+        )
+        if candidate:
+            candidate_str = str(candidate).strip()
+            # Strip legacy leading hyphens (e.g., "-range-vyos")
+            candidate_str = candidate_str.lstrip("-")
+            # Normalize legacy values to the new gateway naming
+            if candidate_str.lower() in {"range-vyos", "vyos"}:
+                candidate_str = "range-gateway"
+            if candidate_str:
+                label = candidate_str
+
+    return build_dns_safe_name(club, label, username)
+
+
 def load_infra_config(infra_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load infrastructure configuration from infra.toml file.
@@ -432,8 +471,8 @@ class VMManager:
         return deleted_count
 
     def nuke_gateway_vms(self) -> int:
-        """Delete all VMs with names ending in '-range-gw'."""
-        return self.nuke_by_pattern(r".*-range-gw$")
+        """Delete all gateway VMs (legacy '-range-gw' or new '-range-gateway')."""
+        return self.nuke_by_pattern(r".*-range-gw(?:ateway)?$")
 
     def get_vm_mac_addresses(self, vmid: int) -> Dict[str, str]:
         """
@@ -1350,16 +1389,42 @@ class RangeManager:
             resource_prefix = build_resource_prefix(username, club)
 
             # Load infrastructure configuration if pool_suffix not provided
+            infra_config = load_infra_config()
+            naming_config = infra_config.get("naming", {})
             if pool_suffix is None:
-                infra_config = load_infra_config()
-                naming_config = infra_config.get("naming", {})
                 pool_suffix = naming_config.get("pool_suffix", "-range")
-                vyos_suffix = naming_config.get("vyos_suffix", "-range-vyos")
-            else:
-                vyos_suffix = "-range-vyos"  # Default fallback
 
             pool_name = f"{resource_prefix}{pool_suffix}"
-            vyos_name = build_dns_safe_name(resource_prefix, vyos_suffix)
+
+            gateway_name_candidates = [
+                build_gateway_clone_name(username, club, naming_config)
+            ]
+
+            # Include legacy naming patterns for backward compatibility
+            legacy_suffixes = []
+            config_suffix = naming_config.get("vyos_suffix")
+            if config_suffix:
+                legacy_suffixes.append(str(config_suffix))
+            legacy_suffixes.append("-range-vyos")
+
+            for suffix in legacy_suffixes:
+                if not suffix:
+                    continue
+                legacy_name = build_dns_safe_name(resource_prefix, suffix)
+                gateway_name_candidates.append(legacy_name)
+
+            seen_names: List[str] = []
+            for candidate in gateway_name_candidates:
+                if candidate not in seen_names:
+                    seen_names.append(candidate)
+
+            vyos_vm = None
+            vyos_name = ""
+            for candidate in seen_names:
+                vyos_vm = self.vms.find_vm_by_name(candidate)
+                if vyos_vm:
+                    vyos_name = candidate
+                    break
 
             # Check if pool exists
             if not self.pools.pool_exists(pool_name):
@@ -1379,12 +1444,21 @@ class RangeManager:
                 return False
 
             # Check if VyOS gateway VM exists
-            vyos_vm = self.vms.find_vm_by_name(vyos_name)
             if not vyos_vm:
-                logger.debug(
-                    f"VyOS gateway VM {vyos_name} doesn't exist for {username}"
-                    f"{f' (club {club})' if club else ''}"
-                )
+                if seen_names:
+                    expected = ", ".join(seen_names)
+                    logger.debug(
+                        "VyOS gateway VM not found for %s%s. "
+                        "Tried names: %s",
+                        username,
+                        f" (club {club})" if club else "",
+                        expected,
+                    )
+                else:
+                    logger.debug(
+                        f"VyOS gateway VM doesn't exist for {username}"
+                        f"{f' (club {club})' if club else ''}"
+                    )
                 return False
 
             # Verify the VM is in the correct pool
@@ -1481,8 +1555,7 @@ class RangeManager:
 
             # Get next available VM ID
             new_vmid = self.proxmox.cluster.nextid.get()
-            vyos_suffix = naming_config.get("vyos_suffix", "-range-vyos")
-            clone_name = build_dns_safe_name(resource_prefix, vyos_suffix)
+            clone_name = build_gateway_clone_name(username, club, naming_config)
 
             # Clone the gateway VM
             success, _ = self.vms.clone_vm(base_vmid, new_vmid, clone_name, pool_name)
