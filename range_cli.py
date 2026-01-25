@@ -28,8 +28,11 @@ from rangemgr import (
     RangeManager,
     load_secrets,
     load_infra_config,
+    load_vmids,
     build_resource_prefix,
     build_dns_safe_name,
+    build_vm_clone_name,
+    resolve_template_label,
 )
 
 # Configure logging
@@ -587,6 +590,11 @@ def handle_range_commands(args, manager: RangeManager):
                     print("  MAC addresses will be preserved")
                 if args.retrowin:
                     print("  Using rtl8139 network interface type (retro Windows mode)")
+                try:
+                    vm_templates = load_vmids()
+                except Exception as exc:
+                    logger.debug("Unable to load VM templates: %s", exc)
+                    vm_templates = {}
             except ValueError as e:
                 print(f"Error parsing VMIDs: {e}")
                 return
@@ -596,9 +604,18 @@ def handle_range_commands(args, manager: RangeManager):
 
             for base_vmid in additional_vmids:
                 new_vmid = manager.proxmox.cluster.nextid.get()
-                clone_name = build_dns_safe_name(resource_prefix, f"range-{base_vmid}")
+                template_label = resolve_template_label(base_vmid, vm_templates)
+                clone_name = build_vm_clone_name(
+                    args.username,
+                    base_vmid,
+                    club=args.club,
+                    templates=vm_templates,
+                )
 
-                print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
+                print(
+                    f"  Cloning VM {base_vmid} "
+                    f"({template_label}) to {new_vmid} ({clone_name})..."
+                )
                 vm_success, template_mac_addresses = manager.vms.clone_vm(
                     base_vmid,
                     new_vmid,
@@ -619,6 +636,7 @@ def handle_range_commands(args, manager: RangeManager):
                             preserve_mac=args.preserve_mac,
                             template_mac_addresses=template_mac_addresses,
                             retrowin=args.retrowin,
+                            template_vmid=base_vmid,
                         )
 
                     # Set permissions for the user on this VM
@@ -666,6 +684,11 @@ def handle_range_commands(args, manager: RangeManager):
                     print("  MAC addresses will be preserved")
                 if args.retrowin:
                     print("  Using rtl8139 network interface type (retro Windows mode)")
+                try:
+                    vm_templates = load_vmids()
+                except Exception as exc:
+                    logger.debug("Unable to load VM templates: %s", exc)
+                    vm_templates = {}
             except ValueError as e:
                 print(f"Error parsing VMIDs: {e}")
                 return
@@ -702,9 +725,18 @@ def handle_range_commands(args, manager: RangeManager):
 
             for base_vmid in additional_vmids:
                 new_vmid = manager.proxmox.cluster.nextid.get()
-                clone_name = build_dns_safe_name(resource_prefix, f"range-{base_vmid}")
+                template_label = resolve_template_label(base_vmid, vm_templates)
+                clone_name = build_vm_clone_name(
+                    username,
+                    base_vmid,
+                    club=args.club,
+                    templates=vm_templates,
+                )
 
-                print(f"  Cloning VM {base_vmid} to {new_vmid} ({clone_name})...")
+                print(
+                    f"  Cloning VM {base_vmid} "
+                    f"({template_label}) to {new_vmid} ({clone_name})..."
+                )
                 vm_success, template_mac_addresses = manager.vms.clone_vm(
                     base_vmid,
                     new_vmid,
@@ -721,6 +753,7 @@ def handle_range_commands(args, manager: RangeManager):
                         preserve_mac=args.preserve_mac,
                         template_mac_addresses=template_mac_addresses,
                         retrowin=args.retrowin,
+                        template_vmid=base_vmid,
                     )
 
                 if vm_success:

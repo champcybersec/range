@@ -18,7 +18,13 @@ import random
 import tomli
 import logging
 from typing import Dict, Any, Optional
-from rangemgr import RangeManager, load_secrets, get_proxmox_client
+from rangemgr import (
+    RangeManager,
+    load_secrets,
+    get_proxmox_client,
+    load_vmids,
+    build_vm_clone_name,
+)
 
 # Configure logging for development and debugging
 logging.basicConfig(
@@ -277,14 +283,31 @@ def mrange():
 
     try:
         prox = get_proxmox()
+        try:
+            vm_templates = load_vmids()
+        except Exception as exc:
+            logger.debug("Unable to load VM templates: %s", exc)
+            vm_templates = {}
+
         for user in users:
             for base_vmid in vmids:
+                # Support optional club prefix in username strings (e.g., 'CCDC/jane.doe')
+                club_name = None
+                username_only = user
+                if "/" in user:
+                    club_name, username_only = user.split("/", 1)
+                clone_name = build_vm_clone_name(
+                    username_only,
+                    base_vmid,
+                    club=club_name,
+                    templates=vm_templates,
+                )
+
                 # Create a clone name and ID
                 new_vmid = prox.cluster.nextid.get()
-                name = f"{user}-range-{base_vmid}"
                 prox.nodes(PROXMOX_NODE).qemu(base_vmid).clone.post(
                     newid=new_vmid,
-                    name=name,
+                    name=clone_name,
                     full=0,
                     target=PROXMOX_NODE,
                 )
@@ -314,8 +337,6 @@ def clone_page():
     """
     if request.method == "GET":
         # Load VM templates from TOML configuration
-        from rangemgr import load_vmids
-
         try:
             vm_templates = load_vmids()
         except Exception as e:
@@ -334,12 +355,6 @@ def clone_page():
             400,
         )
 
-    # Load range manager for user validation
-    from rangemgr import RangeManager, load_secrets
-
-    secrets = load_secrets()
-    range_manager = RangeManager(secrets)
-
     # Validate user exists in AD realm
     if not range_manager.users.validate_ad_user(username):
         error_msg = range_manager.users.get_ad_user_error_message(username)
@@ -353,23 +368,41 @@ def clone_page():
     logger.info(f"Cloning VM {vmid} for user {username}@ad")
     try:
         prox = get_proxmox()
+        try:
+            vm_templates = load_vmids()
+        except Exception as exc:
+            logger.debug("Unable to load VM templates: %s", exc)
+            vm_templates = {}
+
+        club_name = None
+        username_only = username
+        if "/" in username:
+            club_name, username_only = username.split("/", 1)
+
+        clone_name = build_vm_clone_name(
+            username_only,
+            vmid,
+            club=club_name,
+            templates=vm_templates,
+        )
+
         new_vmid = prox.cluster.nextid.get()
         prox.nodes(PROXMOX_NODE).qemu(vmid).clone.post(
             newid=new_vmid,
-            name=f"{username}-range-wk4-{vmid}",
+            name=clone_name,
             full=0,
             target=PROXMOX_NODE,
             pool=f"{username}-range",
         )
 
         # Configure network using user-specific vnet
-        net0 = f"e1000,bridge={get_vnet_for_user(prox, username)}"
+        net0 = f"e1000,bridge={get_vnet_for_user(prox, username_only)}"
         prox.nodes(PROXMOX_NODE).qemu(new_vmid).config.post(net0=net0)
 
         # Grant Administrator role to username@ad on this VM
         prox.access.acl.put(
             path=f"/vms/{new_vmid}",
-            users=f"{username}@ad",
+            users=f"{username_only}@ad",
             roles="PVEAdmin,Administrator",
         )
 

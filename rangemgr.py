@@ -121,6 +121,63 @@ def load_vmids(vmids_path: Optional[str] = None) -> Dict[str, str]:
         return config.get("templates", {})
 
 
+def resolve_template_label(
+    template_vmid: int,
+    templates: Optional[Dict[str, str]] = None,
+) -> str:
+    """
+    Resolve a human-friendly label for a VM template.
+
+    Args:
+        template_vmid: VMID of the template
+        templates: Optional mapping of VMID -> label (avoids reloading TOML)
+
+    Returns:
+        Label for the template, or a fallback string if not found.
+    """
+    vmid_key = str(template_vmid)
+
+    if templates and vmid_key in templates:
+        return templates[vmid_key]
+
+    if templates is None:
+        try:
+            templates = load_vmids()
+            if vmid_key in templates:
+                return templates[vmid_key]
+        except Exception as exc:
+            logger.debug(
+                "Could not load VM template labels for VMID %s: %s",
+                template_vmid,
+                exc,
+            )
+
+    return f"range-{template_vmid}"
+
+
+def build_vm_clone_name(
+    username: str,
+    template_vmid: int,
+    club: Optional[str] = None,
+    templates: Optional[Dict[str, str]] = None,
+) -> str:
+    """
+    Build the display name for a cloned VM using username, club, and template name.
+
+    Args:
+        username: Base username without realm
+        template_vmid: ID of the template being cloned
+        club: Optional club identifier (e.g., 'CCDC')
+        templates: Optional mapping of VMID -> template label to avoid reloads
+
+    Returns:
+        DNS-safe VM name following the pattern username-club-template.
+    """
+    template_label = resolve_template_label(template_vmid, templates)
+    # The helper filters out empty parts automatically.
+    return build_dns_safe_name(username, club, template_label)
+
+
 def load_infra_config(infra_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load infrastructure configuration from infra.toml file.
