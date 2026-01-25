@@ -1448,8 +1448,7 @@ class RangeManager:
                 if seen_names:
                     expected = ", ".join(seen_names)
                     logger.debug(
-                        "VyOS gateway VM not found for %s%s. "
-                        "Tried names: %s",
+                        "VyOS gateway VM not found for %s%s. " "Tried names: %s",
                         username,
                         f" (club {club})" if club else "",
                         expected,

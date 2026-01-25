@@ -24,6 +24,8 @@ from rangemgr import (
     get_proxmox_client,
     load_vmids,
     build_vm_clone_name,
+    build_resource_prefix,
+    load_infra_config,
 )
 
 # Configure logging for development and debugging
@@ -64,8 +66,12 @@ PROXMOX_NODE = secrets["proxmox"].get("node", "pve")
 SUPER_SECRET = secrets.get("web", {}).get("admin_password", "changeme")
 AUTHK = "yup"  # Authentication cookie value
 
+SELF_SERVICE_CLUB = "TEST"
 
-def get_vnet_for_user(proxmox: ProxmoxAPI, username: str) -> Optional[str]:
+
+def get_vnet_for_user(
+    _proxmox: ProxmoxAPI, username: str, club: Optional[str] = None
+) -> Optional[str]:
     """
     Get the virtual network (vnet) assigned to a specific user.
 
@@ -74,11 +80,12 @@ def get_vnet_for_user(proxmox: ProxmoxAPI, username: str) -> Optional[str]:
     Args:
         proxmox: Authenticated ProxmoxAPI client (kept for compatibility)
         username: Username to look up network for
+        club: Optional namespace/club identifier
 
     Returns:
         The vnet name if found, None otherwise
     """
-    return range_manager.networks.get_vnet_for_user(username)
+    return range_manager.networks.get_vnet_for_user(username, club=club)
 
 
 def get_proxmox() -> ProxmoxAPI:
@@ -347,17 +354,44 @@ def clone_page():
             "page.html",
             content=render_template("clone.html", vm_templates=vm_templates),
         )
-    username = request.form.get("username").strip()
-    vmid = int(request.form.get("vmid"))
-    if not username or not vmid:
+    raw_username = (request.form.get("username") or "").strip()
+    vmid_raw = request.form.get("vmid")
+
+    if not raw_username or not vmid_raw:
         return (
             render_template("page.html", content="<h2>Username and VMID required</h2>"),
             400,
         )
 
+    try:
+        vmid = int(vmid_raw)
+    except (TypeError, ValueError):
+        return (
+            render_template(
+                "page.html", content=f"<h2>Invalid VMID supplied: {vmid_raw}</h2>"
+            ),
+            400,
+        )
+
+    username_only = raw_username
+    if "/" in raw_username:
+        _, username_only = raw_username.split("/", 1)
+    username_only = username_only.strip()
+
+    if not username_only:
+        return (
+            render_template(
+                "page.html",
+                content="<h2>Username cannot be empty after processing namespace</h2>",
+            ),
+            400,
+        )
+
+    club_name = SELF_SERVICE_CLUB
+
     # Validate user exists in AD realm
-    if not range_manager.users.validate_ad_user(username):
-        error_msg = range_manager.users.get_ad_user_error_message(username)
+    if not range_manager.users.validate_ad_user(username_only):
+        error_msg = range_manager.users.get_ad_user_error_message(username_only)
         return (
             render_template(
                 "page.html", content=f"<h2>User Validation Error</h2><p>{error_msg}</p>"
@@ -365,7 +399,46 @@ def clone_page():
             400,
         )
 
-    logger.info(f"Cloning VM {vmid} for user {username}@ad")
+    # Ensure the user's TEST club range exists before cloning
+    if not range_manager.setup_user_range(username_only, club=club_name):
+        logger.error(
+            "Failed to set up range for %s in %s namespace", username_only, club_name
+        )
+        return (
+            render_template(
+                "page.html",
+                content=(
+                    "<h2>Range Setup Error</h2>"
+                    f"<p>Unable to prepare the {club_name} range for {username_only}@ad."
+                    " Please contact an administrator.</p>"
+                ),
+            ),
+            500,
+        )
+
+    try:
+        infra_config = load_infra_config()
+        naming_config = infra_config.get("naming", {})
+        pool_suffix_value = naming_config.get("pool_suffix", "-range")
+        pool_suffix = "-range"
+        if pool_suffix_value is not None:
+            pool_suffix_str = str(pool_suffix_value).strip()
+            if pool_suffix_str:
+                pool_suffix = pool_suffix_str
+    except Exception as exc:
+        logger.error("Failed to load infrastructure configuration: %s", exc)
+        pool_suffix = "-range"
+
+    resource_prefix = build_resource_prefix(username_only, club_name)
+    pool_name = f"{resource_prefix}{pool_suffix}"
+
+    logger.info(
+        "Cloning VM %s for user %s@ad within %s namespace pool %s",
+        vmid,
+        username_only,
+        club_name,
+        pool_name,
+    )
     try:
         prox = get_proxmox()
         try:
@@ -373,11 +446,6 @@ def clone_page():
         except Exception as exc:
             logger.debug("Unable to load VM templates: %s", exc)
             vm_templates = {}
-
-        club_name = None
-        username_only = username
-        if "/" in username:
-            club_name, username_only = username.split("/", 1)
 
         clone_name = build_vm_clone_name(
             username_only,
@@ -392,11 +460,32 @@ def clone_page():
             name=clone_name,
             full=0,
             target=PROXMOX_NODE,
-            pool=f"{username}-range",
+            pool=pool_name,
         )
 
-        # Configure network using user-specific vnet
-        net0 = f"e1000,bridge={get_vnet_for_user(prox, username_only)}"
+        # Configure network using user-specific vnet in TEST namespace
+        vnet_name = range_manager.networks.get_vnet_for_user(
+            username_only, club=club_name
+        )
+        if not vnet_name:
+            logger.error(
+                "No VNet found for %s in %s namespace after setup",
+                username_only,
+                club_name,
+            )
+            return (
+                render_template(
+                    "page.html",
+                    content=(
+                        "<h2>Networking Error</h2>"
+                        f"<p>Could not locate a VNet for {username_only}@ad in the {club_name} namespace."
+                        " Please contact an administrator.</p>"
+                    ),
+                ),
+                500,
+            )
+
+        net0 = f"e1000,bridge={vnet_name}"
         prox.nodes(PROXMOX_NODE).qemu(new_vmid).config.post(net0=net0)
 
         # Grant Administrator role to username@ad on this VM
@@ -408,10 +497,24 @@ def clone_page():
 
         return render_template(
             "page.html",
-            content=f"<h2>Cloned VMID {vmid} to {new_vmid} and granted Administrator to {username}@ad</h2><p>Next, log into Proxmox at <a href='https://192.168.3.236:8006' target='_blank' rel='noopener'>https://192.168.3.236:8006</a></p>",
+            content=(
+                "<h2>"
+                f"Cloned VMID {vmid} to {new_vmid} and granted Administrator to {username_only}@ad"
+                f" in the {club_name} namespace"
+                "</h2>"
+                "<p>Next, log into Proxmox at "
+                "<a href='https://192.168.3.236:8006' target='_blank' rel='noopener'>"
+                "https://192.168.3.236:8006</a></p>"
+            ),
         )
     except Exception as e:
-        logger.error(f"Failed to clone VM {vmid} for user {username}: {e}")
+        logger.error(
+            "Failed to clone VM %s for user %s in %s namespace: %s",
+            vmid,
+            username_only,
+            club_name,
+            e,
+        )
         return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
 
 
