@@ -1213,10 +1213,14 @@ class PoolManager:
     """Handles pool operations."""
 
     def __init__(
-        self, proxmox: ProxmoxAPI, secrets: Optional[Dict[str, Any]] = None
+        self,
+        proxmox: ProxmoxAPI,
+        secrets: Optional[Dict[str, Any]] = None,
+        vm_manager: Optional["VMManager"] = None,
     ):
         self.proxmox = proxmox
         self.secrets = secrets
+        self.vm_manager = vm_manager
 
     def get_pools(self) -> List[Dict[str, Any]]:
         """Get list of all pools."""
@@ -1277,6 +1281,12 @@ class PoolManager:
         Returns:
             True if deletion succeeded, False otherwise
         """
+        if not self._delete_pool_members(pool_name):
+            logger.error(
+                "Aborting deletion of pool %s because member cleanup failed", pool_name
+            )
+            return False
+
         try:
             encoded_pool_name = urllib.parse.quote(pool_name, safe="")
             self.proxmox.pools(encoded_pool_name).delete()
@@ -1410,6 +1420,73 @@ class PoolManager:
             logger.error(f"Raw HTTP pool deletion failed for {pool_name}: {raw_error}")
             return False
 
+    def _delete_pool_members(self, pool_name: str) -> bool:
+        """
+        Ensure all VMs in the pool are stopped and deleted before removing the pool.
+
+        Returns True if cleanup succeeded or there were no VMs to delete.
+        """
+        members = self._get_pool_members(pool_name)
+        if not members:
+            return True
+
+        if not self.vm_manager:
+            logger.warning(
+                "Pool %s has %d members but no VM manager is available for cleanup",
+                pool_name,
+                len(members),
+            )
+            return False
+
+        failures: List[int] = []
+
+        for member in members:
+            vmid = member.get("vmid")
+            if vmid is None:
+                continue
+
+            # Stop VM (force to avoid wait) then delete
+            try:
+                self.vm_manager.stop_vm(vmid, force=True)
+                if not self.vm_manager.delete_vm(vmid, force=True):
+                    failures.append(vmid)
+            except Exception as exc:
+                logger.error(
+                    "Encountered exception while deleting VM %s from pool %s: %s",
+                    vmid,
+                    pool_name,
+                    exc,
+                )
+                failures.append(vmid)
+
+        if failures:
+            logger.error(
+                "Failed to delete VMs %s contained in pool %s",
+                ", ".join(str(vmid) for vmid in failures),
+                pool_name,
+            )
+            return False
+
+        return True
+
+    def _get_pool_members(self, pool_name: str) -> List[Dict[str, Any]]:
+        """Return VM members of a pool."""
+        encoded_pool_name = urllib.parse.quote(pool_name, safe="")
+        try:
+            details = self.proxmox.pools(encoded_pool_name).get()
+        except Exception as e:
+            logger.warning(f"Unable to retrieve members for pool {pool_name}: {e}")
+            return []
+
+        members = details.get("members") or []
+        vm_members: List[Dict[str, Any]] = []
+        for member in members:
+            member_type = (member.get("type") or "").lower()
+            if member_type in {"qemu", "vm"} and member.get("vmid") is not None:
+                vm_members.append(member)
+
+        return vm_members
+
 
 class RangeManager:
     """
@@ -1437,7 +1514,7 @@ class RangeManager:
         self.vms = VMManager(self.proxmox, self.node)
         self.users = UserManager(self.proxmox)
         self.networks = NetworkManager(self.proxmox, secrets)
-        self.pools = PoolManager(self.proxmox, secrets)
+        self.pools = PoolManager(self.proxmox, secrets, self.vms)
 
     def user_has_complete_range(
         self,

@@ -368,13 +368,17 @@ class TestPoolManager(unittest.TestCase):
 
     def setUp(self):
         self.mock_proxmox = MagicMock()
-        self.pool_manager = PoolManager(self.mock_proxmox)
+        self.mock_pool_resource = MagicMock()
+        self.mock_proxmox.pools.return_value = self.mock_pool_resource
+        self.mock_pool_resource.get.return_value = {"members": []}
+        self.mock_pool_resource.delete.return_value = {"data": None}
         self.mock_proxmox.pools.get.return_value = [
             {"poolid": "john.doe-range"},
             {"poolid": "prod"},
             {"poolid": "infra-range"},
             {"poolid": "jane.doe-range"},
         ]
+        self.pool_manager = PoolManager(self.mock_proxmox)
 
     def test_find_pools_by_pattern_excludes_protected(self):
         """Ensure protected pools are excluded from match results."""
@@ -406,6 +410,27 @@ class TestPoolManager(unittest.TestCase):
         self.assertTrue(result)
         self.mock_proxmox.pools.assert_called_with(encoded)
         delete_resource.delete.assert_called_once_with()
+
+    def test_delete_pool_removes_members_with_vm_manager(self):
+        """Pool deletion should remove member VMs before deleting the pool."""
+        self.mock_pool_resource.get.return_value = {
+            "members": [
+                {"type": "qemu", "vmid": 101},
+                {"type": "storage", "id": "local-lvm"},
+            ]
+        }
+        mock_vm_manager = MagicMock()
+        mock_vm_manager.stop_vm.return_value = True
+        mock_vm_manager.delete_vm.return_value = True
+
+        pool_manager = PoolManager(self.mock_proxmox, vm_manager=mock_vm_manager)
+
+        result = pool_manager.delete_pool("john.doe-range")
+
+        self.assertTrue(result)
+        mock_vm_manager.stop_vm.assert_called_with(101, force=True)
+        mock_vm_manager.delete_vm.assert_called_with(101, force=True)
+        self.mock_pool_resource.delete.assert_called_once_with()
 
     @patch("rangemgr.requests.delete")
     @patch("rangemgr.requests.post")
