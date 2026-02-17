@@ -418,6 +418,30 @@ class TestPoolManager(unittest.TestCase):
         mock_vm_manager.delete_vm.assert_called_with(101, force=True)
         self.mock_proxmox.pools.delete.assert_called_with(poolid="john.doe-range")
 
+    def test_delete_pool_member_lookup_handles_list_response(self):
+        """Pool member discovery should handle list responses from the API."""
+        self.mock_proxmox.pools.get.return_value = [
+            {"poolid": "other", "members": [{"type": "qemu", "vmid": 50}]},
+            {
+                "poolid": "john.doe-range",
+                "members": [
+                    {"type": "qemu", "vmid": 101},
+                ],
+            },
+        ]
+        mock_vm_manager = MagicMock()
+        mock_vm_manager.stop_vm.return_value = True
+        mock_vm_manager.delete_vm.return_value = True
+
+        pool_manager = PoolManager(self.mock_proxmox, vm_manager=mock_vm_manager)
+
+        result = pool_manager.delete_pool("john.doe-range")
+
+        self.assertTrue(result)
+        mock_vm_manager.stop_vm.assert_called_with(101, force=True)
+        mock_vm_manager.delete_vm.assert_called_with(101, force=True)
+        self.mock_proxmox.pools.delete.assert_called_with(poolid="john.doe-range")
+
     @patch("rangemgr.requests.delete")
     @patch("rangemgr.requests.post")
     def test_delete_pool_fallback_to_raw_http(self, mock_post, mock_delete):

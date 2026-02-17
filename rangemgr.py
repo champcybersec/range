@@ -1476,7 +1476,15 @@ class PoolManager:
             logger.warning(f"Unable to retrieve members for pool {pool_name}: {e}")
             return []
 
-        members = pool_detail.get("members") or []
+        if isinstance(pool_detail, list):
+            target = next(
+                (item for item in pool_detail if item.get("poolid") == pool_name),
+                (pool_detail[0] if pool_detail else {}),
+            )
+        else:
+            target = pool_detail
+
+        members = target.get("members") or []
         vm_members: List[Dict[str, Any]] = []
         for member in members:
             member_type = (member.get("type") or "").lower()
