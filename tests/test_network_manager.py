@@ -6,6 +6,7 @@ VNet alias comparisons were case-sensitive and didn't handle whitespace.
 """
 
 import unittest
+import urllib.parse
 from unittest.mock import Mock, MagicMock, call
 from rangemgr import NetworkManager, PoolManager
 
@@ -391,6 +392,20 @@ class TestPoolManager(unittest.TestCase):
         self.pool_manager.delete_pool.assert_has_calls(
             [call("john.doe-range"), call("jane.doe-range")], any_order=False
         )
+
+    def test_delete_pool_encodes_slash_names(self):
+        """Pool deletions should percent-encode names with slashes."""
+        pool_name = "WICYS/wicys9-range"
+        encoded = urllib.parse.quote(pool_name, safe="")
+
+        delete_resource = self.mock_proxmox.pools.return_value
+        delete_resource.delete.return_value = {"data": None}
+
+        result = self.pool_manager.delete_pool(pool_name)
+
+        self.assertTrue(result)
+        self.mock_proxmox.pools.assert_called_with(encoded)
+        delete_resource.delete.assert_called_once_with()
 
     def test_nuke_pools_by_pattern_dry_run(self):
         """Dry run should not delete any pools."""

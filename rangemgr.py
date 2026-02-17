@@ -1275,7 +1275,8 @@ class PoolManager:
             True if deletion succeeded, False otherwise
         """
         try:
-            self.proxmox.pools(pool_name).delete()
+            encoded_pool_name = urllib.parse.quote(pool_name, safe="")
+            self.proxmox.pools(encoded_pool_name).delete()
             logger.info(f"Deleted pool: {pool_name}")
             return True
         except Exception as e:

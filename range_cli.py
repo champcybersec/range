@@ -37,7 +37,7 @@ from rangemgr import (
 
 # Preset regex aliases for frequently used pool nuke operations.
 POOL_NUKE_PRESETS = {
-    "all-ranges": r"^[A-Z]+/[a-z0-9._-]+-range$",
+    "all-ranges": r"^[A-Z]+/[a-z0-9._-]+(?:-range)?$",
 }
 
 # Configure logging
