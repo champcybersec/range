@@ -1400,13 +1400,13 @@ class PoolManager:
             headers = {"CSRFPreventionToken": auth_data["CSRFPreventionToken"]}
             cookies = {"PVEAuthCookie": auth_data["ticket"]}
 
-            encoded_pool_name = urllib.parse.quote(pool_name, safe="")
-            delete_url = f"{host}/api2/json/pools/{encoded_pool_name}"
+            delete_url = f"{host}/api2/json/pools"
 
             delete_response = requests.delete(
                 delete_url,
                 headers=headers,
                 cookies=cookies,
+                params={"poolid": pool_name},
                 verify=verify_ssl,
                 timeout=30,
             )
@@ -1471,12 +1471,19 @@ class PoolManager:
     def _get_pool_members(self, pool_name: str) -> List[Dict[str, Any]]:
         """Return VM members of a pool."""
         try:
-            details = self.proxmox.pools(pool_name).get()
+            pools = self.get_pools()
         except Exception as e:
             logger.warning(f"Unable to retrieve members for pool {pool_name}: {e}")
             return []
 
-        members = details.get("members") or []
+        target_pool = next(
+            (pool for pool in pools if pool.get("poolid") == pool_name), None
+        )
+        if not target_pool:
+            logger.debug("Pool %s not found while gathering members", pool_name)
+            return []
+
+        members = target_pool.get("members") or []
         vm_members: List[Dict[str, Any]] = []
         for member in members:
             member_type = (member.get("type") or "").lower()

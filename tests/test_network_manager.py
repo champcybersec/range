@@ -6,7 +6,6 @@ VNet alias comparisons were case-sensitive and didn't handle whitespace.
 """
 
 import unittest
-import urllib.parse
 from unittest.mock import Mock, MagicMock, call, patch
 from rangemgr import NetworkManager, PoolManager
 
@@ -368,15 +367,12 @@ class TestPoolManager(unittest.TestCase):
 
     def setUp(self):
         self.mock_proxmox = MagicMock()
-        self.mock_pool_resource = MagicMock()
-        self.mock_proxmox.pools.return_value = self.mock_pool_resource
-        self.mock_pool_resource.get.return_value = {"members": []}
         self.mock_proxmox.pools.delete.return_value = {"data": None}
         self.mock_proxmox.pools.get.return_value = [
-            {"poolid": "john.doe-range"},
-            {"poolid": "prod"},
-            {"poolid": "infra-range"},
-            {"poolid": "jane.doe-range"},
+            {"poolid": "john.doe-range", "members": []},
+            {"poolid": "prod", "members": []},
+            {"poolid": "infra-range", "members": []},
+            {"poolid": "jane.doe-range", "members": []},
         ]
         self.pool_manager = PoolManager(self.mock_proxmox)
 
@@ -397,28 +393,26 @@ class TestPoolManager(unittest.TestCase):
             [call("john.doe-range"), call("jane.doe-range")], any_order=False
         )
 
-    def test_delete_pool_encodes_slash_names(self):
-        """Pool deletions should percent-encode names with slashes."""
+    def test_delete_pool_handles_slash_names(self):
+        """Pool deletions should support slash-separated pool IDs."""
         pool_name = "WICYS/wicys9-range"
-        encoded = urllib.parse.quote(pool_name, safe="")
-
-        delete_resource = self.mock_proxmox.pools.return_value
-        delete_resource.delete.return_value = {"data": None}
 
         result = self.pool_manager.delete_pool(pool_name)
 
         self.assertTrue(result)
-        self.mock_proxmox.pools.assert_called_with(pool_name)
         self.mock_proxmox.pools.delete.assert_called_once_with(poolid=pool_name)
 
     def test_delete_pool_removes_members_with_vm_manager(self):
         """Pool deletion should remove member VMs before deleting the pool."""
-        self.mock_pool_resource.get.return_value = {
-            "members": [
-                {"type": "qemu", "vmid": 101},
-                {"type": "storage", "id": "local-lvm"},
-            ]
-        }
+        self.mock_proxmox.pools.get.return_value = [
+            {
+                "poolid": "john.doe-range",
+                "members": [
+                    {"type": "qemu", "vmid": 101},
+                    {"type": "storage", "id": "local-lvm"},
+                ],
+            }
+        ]
         mock_vm_manager = MagicMock()
         mock_vm_manager.stop_vm.return_value = True
         mock_vm_manager.delete_vm.return_value = True
@@ -476,8 +470,12 @@ class TestPoolManager(unittest.TestCase):
         )
         mock_delete.assert_called_once()
         delete_url = mock_delete.call_args[0][0]
-        self.assertTrue(delete_url.startswith("https://pve.example.com:8006"))
-        self.assertTrue(delete_url.endswith("CLUB%2Fuser-range"))
+        delete_kwargs = mock_delete.call_args.kwargs
+        self.assertEqual(
+            delete_url, "https://pve.example.com:8006/api2/json/pools"
+        )
+        self.assertIn("params", delete_kwargs)
+        self.assertEqual(delete_kwargs["params"], {"poolid": "CLUB/user-range"})
 
     def test_nuke_pools_by_pattern_dry_run(self):
         """Dry run should not delete any pools."""
