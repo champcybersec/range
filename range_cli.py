@@ -35,6 +35,11 @@ from rangemgr import (
     resolve_template_label,
 )
 
+# Preset regex aliases for frequently used pool nuke operations.
+POOL_NUKE_PRESETS = {
+    "all-ranges": r"^[A-Z]+/[a-z0-9._-]+-range$",
+}
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -216,7 +221,13 @@ def setup_pool_commands(subparsers):
     nuke_parser = pool_subparsers.add_parser(
         "nuke", help="Delete pools matching a regex pattern"
     )
-    nuke_parser.add_argument("pattern", help="Regex pattern to match pool IDs")
+    nuke_parser.add_argument(
+        "pattern",
+        help=(
+            "Regex pattern to match pool IDs, or preset alias "
+            f"({', '.join(sorted(POOL_NUKE_PRESETS))})"
+        ),
+    )
     nuke_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -537,8 +548,17 @@ def handle_network_commands(args, manager: RangeManager):
 def handle_pool_commands(args, manager: RangeManager):
     """Handle pool management commands."""
     if args.pool_command == "nuke":
+        preset_used = args.pattern in POOL_NUKE_PRESETS
+        resolved_pattern = POOL_NUKE_PRESETS.get(args.pattern, args.pattern)
+
+        if preset_used:
+            print(
+                f"Using preset '{args.pattern}' "
+                f"({resolved_pattern}) for pool deletion"
+            )
+
         matches, deleted = manager.pools.nuke_pools_by_pattern(
-            args.pattern, dry_run=args.dry_run
+            resolved_pattern, dry_run=args.dry_run
         )
 
         if args.dry_run:
