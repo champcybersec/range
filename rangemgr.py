@@ -1366,8 +1366,13 @@ class PoolManager:
 
         if host.endswith("/api2/json"):
             host = host.replace("/api2/json", "")
-        if not host.startswith("http"):
-            host = f"https://{host}"
+        parsed = urllib.parse.urlparse(host if host.startswith("http") else f"https://{host}")
+        scheme = parsed.scheme or "https"
+        hostname = parsed.hostname or parsed.path  # urlparse puts bare host in path
+        port = parsed.port
+        if port is None:
+            port = 8006 if scheme == "https" else 80
+        host = f"{scheme}://{hostname}:{port}"
 
         if not verify_ssl:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

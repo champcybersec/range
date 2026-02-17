@@ -444,13 +444,14 @@ class TestPoolManager(unittest.TestCase):
 
         self.assertTrue(result)
         mock_post.assert_called_with(
-            "https://pve.example.com/api2/json/access/ticket",
+            "https://pve.example.com:8006/api2/json/access/ticket",
             data={"username": "root@pam", "password": "secret"},
             verify=False,
             timeout=30,
         )
         mock_delete.assert_called_once()
         delete_url = mock_delete.call_args[0][0]
+        self.assertTrue(delete_url.startswith("https://pve.example.com:8006"))
         self.assertTrue(delete_url.endswith("CLUB%2Fuser-range"))
 
     def test_nuke_pools_by_pattern_dry_run(self):
