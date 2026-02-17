@@ -368,12 +368,7 @@ class TestPoolManager(unittest.TestCase):
     def setUp(self):
         self.mock_proxmox = MagicMock()
         self.mock_proxmox.pools.delete.return_value = {"data": None}
-        self.mock_proxmox.pools.get.return_value = [
-            {"poolid": "john.doe-range", "members": []},
-            {"poolid": "prod", "members": []},
-            {"poolid": "infra-range", "members": []},
-            {"poolid": "jane.doe-range", "members": []},
-        ]
+        self.mock_proxmox.pools.get.return_value = {"members": []}
         self.pool_manager = PoolManager(self.mock_proxmox)
 
     def test_find_pools_by_pattern_excludes_protected(self):
@@ -404,15 +399,12 @@ class TestPoolManager(unittest.TestCase):
 
     def test_delete_pool_removes_members_with_vm_manager(self):
         """Pool deletion should remove member VMs before deleting the pool."""
-        self.mock_proxmox.pools.get.return_value = [
-            {
-                "poolid": "john.doe-range",
-                "members": [
-                    {"type": "qemu", "vmid": 101},
-                    {"type": "storage", "id": "local-lvm"},
-                ],
-            }
-        ]
+        self.mock_proxmox.pools.get.return_value = {
+            "members": [
+                {"type": "qemu", "vmid": 101},
+                {"type": "storage", "id": "local-lvm"},
+            ]
+        }
         mock_vm_manager = MagicMock()
         mock_vm_manager.stop_vm.return_value = True
         mock_vm_manager.delete_vm.return_value = True

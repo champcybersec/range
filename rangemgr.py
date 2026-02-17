@@ -1471,19 +1471,12 @@ class PoolManager:
     def _get_pool_members(self, pool_name: str) -> List[Dict[str, Any]]:
         """Return VM members of a pool."""
         try:
-            pools = self.get_pools()
+            pool_detail = self.proxmox.pools.get(poolid=pool_name)
         except Exception as e:
             logger.warning(f"Unable to retrieve members for pool {pool_name}: {e}")
             return []
 
-        target_pool = next(
-            (pool for pool in pools if pool.get("poolid") == pool_name), None
-        )
-        if not target_pool:
-            logger.debug("Pool %s not found while gathering members", pool_name)
-            return []
-
-        members = target_pool.get("members") or []
+        members = pool_detail.get("members") or []
         vm_members: List[Dict[str, Any]] = []
         for member in members:
             member_type = (member.get("type") or "").lower()
