@@ -371,7 +371,7 @@ class TestPoolManager(unittest.TestCase):
         self.mock_pool_resource = MagicMock()
         self.mock_proxmox.pools.return_value = self.mock_pool_resource
         self.mock_pool_resource.get.return_value = {"members": []}
-        self.mock_pool_resource.delete.return_value = {"data": None}
+        self.mock_proxmox.pools.delete.return_value = {"data": None}
         self.mock_proxmox.pools.get.return_value = [
             {"poolid": "john.doe-range"},
             {"poolid": "prod"},
@@ -408,8 +408,8 @@ class TestPoolManager(unittest.TestCase):
         result = self.pool_manager.delete_pool(pool_name)
 
         self.assertTrue(result)
-        self.mock_proxmox.pools.assert_called_with(encoded)
-        delete_resource.delete.assert_called_once_with()
+        self.mock_proxmox.pools.assert_called_with(pool_name)
+        self.mock_proxmox.pools.delete.assert_called_once_with(poolid=pool_name)
 
     def test_delete_pool_removes_members_with_vm_manager(self):
         """Pool deletion should remove member VMs before deleting the pool."""
@@ -430,7 +430,7 @@ class TestPoolManager(unittest.TestCase):
         self.assertTrue(result)
         mock_vm_manager.stop_vm.assert_called_with(101, force=True)
         mock_vm_manager.delete_vm.assert_called_with(101, force=True)
-        self.mock_pool_resource.delete.assert_called_once_with()
+        self.mock_proxmox.pools.delete.assert_called_with(poolid="john.doe-range")
 
     @patch("rangemgr.requests.delete")
     @patch("rangemgr.requests.post")
@@ -447,7 +447,7 @@ class TestPoolManager(unittest.TestCase):
         pool_manager = PoolManager(self.mock_proxmox, secrets)
 
         # Simulate proxmoxer failure
-        self.mock_proxmox.pools.return_value.delete.side_effect = Exception("501 Not Implemented")
+        self.mock_proxmox.pools.delete.side_effect = Exception("501 Not Implemented")
 
         # Mock auth ticket response
         mock_auth_response = Mock()

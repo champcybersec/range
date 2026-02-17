@@ -1288,8 +1288,7 @@ class PoolManager:
             return False
 
         try:
-            encoded_pool_name = urllib.parse.quote(pool_name, safe="")
-            self.proxmox.pools(encoded_pool_name).delete()
+            self.proxmox.pools.delete(poolid=pool_name)
             logger.info(f"Deleted pool: {pool_name}")
             return True
         except Exception as e:
@@ -1471,9 +1470,8 @@ class PoolManager:
 
     def _get_pool_members(self, pool_name: str) -> List[Dict[str, Any]]:
         """Return VM members of a pool."""
-        encoded_pool_name = urllib.parse.quote(pool_name, safe="")
         try:
-            details = self.proxmox.pools(encoded_pool_name).get()
+            details = self.proxmox.pools(pool_name).get()
         except Exception as e:
             logger.warning(f"Unable to retrieve members for pool {pool_name}: {e}")
             return []
