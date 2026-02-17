@@ -1446,7 +1446,18 @@ class PoolManager:
 
             # Stop VM (force to avoid wait) then delete
             try:
-                self.vm_manager.stop_vm(vmid, force=True)
+                status = None
+                try:
+                    status = (self.vm_manager.get_vm_status(vmid) or "").lower()
+                except Exception as status_exc:
+                    logger.debug(
+                        "Could not determine status for VM %s prior to deletion: %s",
+                        vmid,
+                        status_exc,
+                    )
+
+                if status not in {"stopped", "stopped?", "off"}:
+                    self.vm_manager.stop_vm(vmid, force=True)
                 if not self.vm_manager.delete_vm(vmid, force=True):
                     failures.append(vmid)
             except Exception as exc:

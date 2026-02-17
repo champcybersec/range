@@ -408,12 +408,14 @@ class TestPoolManager(unittest.TestCase):
         mock_vm_manager = MagicMock()
         mock_vm_manager.stop_vm.return_value = True
         mock_vm_manager.delete_vm.return_value = True
+        mock_vm_manager.get_vm_status.return_value = "running"
 
         pool_manager = PoolManager(self.mock_proxmox, vm_manager=mock_vm_manager)
 
         result = pool_manager.delete_pool("john.doe-range")
 
         self.assertTrue(result)
+        mock_vm_manager.get_vm_status.assert_called_with(101)
         mock_vm_manager.stop_vm.assert_called_with(101, force=True)
         mock_vm_manager.delete_vm.assert_called_with(101, force=True)
         self.mock_proxmox.pools.delete.assert_called_with(poolid="john.doe-range")
@@ -432,15 +434,34 @@ class TestPoolManager(unittest.TestCase):
         mock_vm_manager = MagicMock()
         mock_vm_manager.stop_vm.return_value = True
         mock_vm_manager.delete_vm.return_value = True
+        mock_vm_manager.get_vm_status.return_value = "running"
 
         pool_manager = PoolManager(self.mock_proxmox, vm_manager=mock_vm_manager)
 
         result = pool_manager.delete_pool("john.doe-range")
 
         self.assertTrue(result)
+        mock_vm_manager.get_vm_status.assert_called_with(101)
         mock_vm_manager.stop_vm.assert_called_with(101, force=True)
         mock_vm_manager.delete_vm.assert_called_with(101, force=True)
         self.mock_proxmox.pools.delete.assert_called_with(poolid="john.doe-range")
+
+    def test_delete_pool_skips_stop_when_already_off(self):
+        """VM stop should be skipped when status indicates the VM is already off."""
+        self.mock_proxmox.pools.get.return_value = {
+            "members": [{"type": "qemu", "vmid": 202}]
+        }
+        mock_vm_manager = MagicMock()
+        mock_vm_manager.get_vm_status.return_value = "stopped"
+        mock_vm_manager.delete_vm.return_value = True
+
+        pool_manager = PoolManager(self.mock_proxmox, vm_manager=mock_vm_manager)
+
+        result = pool_manager.delete_pool("club/user-range")
+
+        self.assertTrue(result)
+        mock_vm_manager.stop_vm.assert_not_called()
+        mock_vm_manager.delete_vm.assert_called_with(202, force=True)
 
     @patch("rangemgr.requests.delete")
     @patch("rangemgr.requests.post")
