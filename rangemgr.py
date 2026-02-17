@@ -1212,8 +1212,11 @@ class NetworkManager:
 class PoolManager:
     """Handles pool operations."""
 
-    def __init__(self, proxmox: ProxmoxAPI):
+    def __init__(
+        self, proxmox: ProxmoxAPI, secrets: Optional[Dict[str, Any]] = None
+    ):
         self.proxmox = proxmox
+        self.secrets = secrets
 
     def get_pools(self) -> List[Dict[str, Any]]:
         """Get list of all pools."""
@@ -1280,6 +1283,12 @@ class PoolManager:
             logger.info(f"Deleted pool: {pool_name}")
             return True
         except Exception as e:
+            logger.warning(
+                f"Standard delete failed for pool {pool_name}: {e}. "
+                "Attempting raw API fallback."
+            )
+            if "/" in pool_name and self._delete_pool_via_http(pool_name):
+                return True
             logger.error(f"Failed to delete pool {pool_name}: {e}")
             return False
 
@@ -1336,6 +1345,66 @@ class PoolManager:
 
         return matches, deleted
 
+    def _delete_pool_via_http(self, pool_name: str) -> bool:
+        """Fallback deletion using direct HTTP requests for slash-containing pool IDs."""
+        if not self.secrets:
+            logger.debug("No secrets provided; cannot perform raw pool deletion.")
+            return False
+
+        proxmox_config = self.secrets.get("proxmox", {})
+        host = proxmox_config.get("host")
+        user = proxmox_config.get("user")
+        password = proxmox_config.get("password")
+
+        if not (host and user and password):
+            logger.error(
+                "Incomplete Proxmox configuration; cannot perform raw pool deletion."
+            )
+            return False
+
+        verify_ssl = proxmox_config.get("verify_ssl", False)
+
+        if host.endswith("/api2/json"):
+            host = host.replace("/api2/json", "")
+        if not host.startswith("http"):
+            host = f"https://{host}"
+
+        if not verify_ssl:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        try:
+            auth_url = f"{host}/api2/json/access/ticket"
+            auth_response = requests.post(
+                auth_url,
+                data={"username": user, "password": password},
+                verify=verify_ssl,
+                timeout=30,
+            )
+            auth_response.raise_for_status()
+            auth_data = auth_response.json()["data"]
+
+            headers = {"CSRFPreventionToken": auth_data["CSRFPreventionToken"]}
+            cookies = {"PVEAuthCookie": auth_data["ticket"]}
+
+            encoded_pool_name = urllib.parse.quote(pool_name, safe="")
+            delete_url = f"{host}/api2/json/pools/{encoded_pool_name}"
+
+            delete_response = requests.delete(
+                delete_url,
+                headers=headers,
+                cookies=cookies,
+                verify=verify_ssl,
+                timeout=30,
+            )
+            delete_response.raise_for_status()
+            logger.info(
+                "Deleted pool %s using raw HTTP request (fallback path)", pool_name
+            )
+            return True
+        except Exception as raw_error:
+            logger.error(f"Raw HTTP pool deletion failed for {pool_name}: {raw_error}")
+            return False
+
 
 class RangeManager:
     """
@@ -1363,7 +1432,7 @@ class RangeManager:
         self.vms = VMManager(self.proxmox, self.node)
         self.users = UserManager(self.proxmox)
         self.networks = NetworkManager(self.proxmox, secrets)
-        self.pools = PoolManager(self.proxmox)
+        self.pools = PoolManager(self.proxmox, secrets)
 
     def user_has_complete_range(
         self,

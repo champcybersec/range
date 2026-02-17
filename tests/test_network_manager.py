@@ -7,7 +7,7 @@ VNet alias comparisons were case-sensitive and didn't handle whitespace.
 
 import unittest
 import urllib.parse
-from unittest.mock import Mock, MagicMock, call
+from unittest.mock import Mock, MagicMock, call, patch
 from rangemgr import NetworkManager, PoolManager
 
 
@@ -406,6 +406,52 @@ class TestPoolManager(unittest.TestCase):
         self.assertTrue(result)
         self.mock_proxmox.pools.assert_called_with(encoded)
         delete_resource.delete.assert_called_once_with()
+
+    @patch("rangemgr.requests.delete")
+    @patch("rangemgr.requests.post")
+    def test_delete_pool_fallback_to_raw_http(self, mock_post, mock_delete):
+        """Fallback raw HTTP deletion should run when proxmoxer delete fails."""
+        secrets = {
+            "proxmox": {
+                "host": "https://pve.example.com",
+                "user": "root@pam",
+                "password": "secret",
+                "verify_ssl": False,
+            }
+        }
+        pool_manager = PoolManager(self.mock_proxmox, secrets)
+
+        # Simulate proxmoxer failure
+        self.mock_proxmox.pools.return_value.delete.side_effect = Exception("501 Not Implemented")
+
+        # Mock auth ticket response
+        mock_auth_response = Mock()
+        mock_auth_response.json.return_value = {
+            "data": {
+                "ticket": "ticket",
+                "CSRFPreventionToken": "token",
+            }
+        }
+        mock_auth_response.raise_for_status = Mock()
+        mock_post.return_value = mock_auth_response
+
+        # Mock delete response
+        mock_delete_response = Mock()
+        mock_delete_response.raise_for_status = Mock()
+        mock_delete.return_value = mock_delete_response
+
+        result = pool_manager.delete_pool("CLUB/user-range")
+
+        self.assertTrue(result)
+        mock_post.assert_called_with(
+            "https://pve.example.com/api2/json/access/ticket",
+            data={"username": "root@pam", "password": "secret"},
+            verify=False,
+            timeout=30,
+        )
+        mock_delete.assert_called_once()
+        delete_url = mock_delete.call_args[0][0]
+        self.assertTrue(delete_url.endswith("CLUB%2Fuser-range"))
 
     def test_nuke_pools_by_pattern_dry_run(self):
         """Dry run should not delete any pools."""
