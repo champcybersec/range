@@ -6,6 +6,7 @@ VNet alias comparisons were case-sensitive and didn't handle whitespace.
 """
 
 import unittest
+from typing import Optional
 from unittest.mock import Mock, MagicMock, call, patch
 from rangemgr import NetworkManager, PoolManager
 
@@ -462,6 +463,51 @@ class TestPoolManager(unittest.TestCase):
         self.assertTrue(result)
         mock_vm_manager.stop_vm.assert_not_called()
         mock_vm_manager.delete_vm.assert_called_with(202, force=True)
+        self.mock_proxmox.pools.delete.assert_called_with(poolid="club/user-range")
+
+    def test_ensure_pool_creates_parent_hierarchy(self):
+        """ensure_pool should create missing parent pools before the child pool."""
+        pool_manager = PoolManager(self.mock_proxmox)
+
+        existing: set[str] = set()
+
+        def pool_exists(name: str) -> bool:
+            return name in existing
+
+        def create_pool(name: str, comment: Optional[str] = None) -> bool:
+            existing.add(name)
+            return True
+
+        pool_manager.pool_exists = Mock(side_effect=pool_exists)
+        pool_manager.create_pool = Mock(side_effect=create_pool)
+
+        result = pool_manager.ensure_pool("CLUB/user-range", comment="Child pool")
+
+        self.assertTrue(result)
+        pool_manager.create_pool.assert_has_calls(
+            [
+                call("CLUB", "Auto-created parent pool for CLUB"),
+                call("CLUB/user-range", "Child pool"),
+            ]
+        )
+
+    def test_ensure_pool_parent_creation_failure_stops_setup(self):
+        """Parent pool failures should abort ensure_pool."""
+        pool_manager = PoolManager(self.mock_proxmox)
+
+        pool_manager.pool_exists = Mock(return_value=False)
+
+        def create_pool_failure(name: str, comment: Optional[str] = None) -> bool:
+            return False if name == "CLUB" else True
+
+        pool_manager.create_pool = Mock(side_effect=create_pool_failure)
+
+        result = pool_manager.ensure_pool("CLUB/user-range")
+
+        self.assertFalse(result)
+        pool_manager.create_pool.assert_called_with(
+            "CLUB", "Auto-created parent pool for CLUB"
+        )
 
     @patch("rangemgr.requests.delete")
     @patch("rangemgr.requests.post")

@@ -1265,6 +1265,9 @@ class PoolManager:
         Returns:
             True if pool exists or was created successfully
         """
+        if not self._ensure_parent_pools(pool_name):
+            return False
+
         if self.pool_exists(pool_name):
             logger.debug(f"Pool {pool_name} already exists")
             return True
@@ -1503,6 +1506,28 @@ class PoolManager:
                 vm_members.append(member)
 
         return vm_members
+
+    def _ensure_parent_pools(self, pool_name: str) -> bool:
+        """
+        Ensure all parent pools for a hierarchical pool name exist.
+
+        Returns True if parents already exist or were created successfully.
+        """
+        segments = [segment.strip() for segment in pool_name.split("/") if segment.strip()]
+        if len(segments) <= 1:
+            return True
+
+        for depth in range(1, len(segments)):
+            parent_name = "/".join(segments[:depth])
+            if self.pool_exists(parent_name):
+                continue
+
+            parent_comment = f"Auto-created parent pool for {parent_name}"
+            if not self.create_pool(parent_name, parent_comment):
+                logger.error(f"Failed to create parent pool {parent_name}")
+                return False
+
+        return True
 
 
 class RangeManager:
