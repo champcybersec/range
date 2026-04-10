@@ -277,6 +277,11 @@ def setup_range_commands(subparsers):
         "--club",
         help="Optional club identifier (e.g., CCDC) to prefix range resources",
     )
+    setup_parser.add_argument(
+        "--no-gateway",
+        action="store_true",
+        help="Skip gateway VM; connect additional VMs directly to the shared infranet bridge",
+    )
 
     # Setup ranges for all AD users
     setup_all_parser = range_subparsers.add_parser(
@@ -312,6 +317,11 @@ def setup_range_commands(subparsers):
     setup_all_parser.add_argument(
         "--club",
         help="Optional club identifier (e.g., CCDC) to prefix range resources",
+    )
+    setup_all_parser.add_argument(
+        "--no-gateway",
+        action="store_true",
+        help="Skip gateway VM; connect additional VMs directly to the shared infranet bridge",
     )
 
 
@@ -591,22 +601,37 @@ def handle_pool_commands(args, manager: RangeManager):
 def handle_range_commands(args, manager: RangeManager):
     """Handle high-level range management commands."""
     if args.range_command == "setup":
-        # First, set up the gateway VM and infrastructure
+        # First, set up the pool (and gateway VM unless --no-gateway)
         success = manager.setup_user_range(
-            args.username, args.base_vmid, args.pool_suffix, club=args.club
+            args.username,
+            args.base_vmid,
+            args.pool_suffix,
+            club=args.club,
+            skip_gateway=args.no_gateway,
         )
 
         if not success:
-            print(f"Failed to set up gateway for {args.username}")
+            label = "range" if args.no_gateway else "gateway"
+            print(f"Failed to set up {label} for {args.username}")
             return
 
         resource_prefix = build_resource_prefix(args.username, args.club)
+
+        # Resolve the VNet name for additional VM networking
+        if args.no_gateway:
+            infra_config = load_infra_config()
+            networking_config = infra_config.get("networking", {})
+            resolved_vnet = networking_config.get("infranet_bridge", "INFRANET")
+        else:
+            resolved_vnet = None  # looked up per-VM below
 
         # Clone additional VMs if specified
         if args.vmids:
             try:
                 additional_vmids = [int(vmid.strip()) for vmid in args.vmids.split(",")]
                 print(f"Cloning additional VMs: {additional_vmids}")
+                if args.no_gateway:
+                    print(f"  Network: shared infranet bridge ({resolved_vnet})")
                 if args.preserve_mac:
                     print("  MAC addresses will be preserved")
                 if args.retrowin:
@@ -646,8 +671,8 @@ def handle_range_commands(args, manager: RangeManager):
                 )
 
                 if vm_success:
-                    # Configure networking with MAC preservation if requested
-                    vnet_name = manager.networks.get_vnet_for_user(
+                    # Determine which VNet to attach this VM to
+                    vnet_name = resolved_vnet or manager.networks.get_vnet_for_user(
                         args.username, club=args.club
                     )
                     if vnet_name:
@@ -695,8 +720,18 @@ def handle_range_commands(args, manager: RangeManager):
         except Exception as e:
             print(f"Warning: AD realm sync failed: {e}")
 
+        # Resolve shared VNet for --no-gateway mode once upfront
+        if args.no_gateway:
+            infra_config = load_infra_config()
+            networking_config = infra_config.get("networking", {})
+            shared_vnet = networking_config.get("infranet_bridge", "INFRANET")
+            print(f"No-gateway mode: VMs will be connected to shared infranet bridge ({shared_vnet})")
+        else:
+            shared_vnet = None
+
         # Parse additional VMIDs if provided
         additional_vmids = []
+        vm_templates = {}
         if args.vmids:
             try:
                 additional_vmids = [int(vmid.strip()) for vmid in args.vmids.split(",")]
@@ -709,7 +744,6 @@ def handle_range_commands(args, manager: RangeManager):
                     vm_templates = load_vmids()
                 except Exception as exc:
                     logger.debug("Unable to load VM templates: %s", exc)
-                    vm_templates = {}
             except ValueError as e:
                 print(f"Error parsing VMIDs: {e}")
                 return
@@ -730,13 +764,18 @@ def handle_range_commands(args, manager: RangeManager):
             username = userid.split("@")[0]
             print(f"Setting up range for {username}...")
 
-            # First, set up the gateway VM and infrastructure
+            # Set up the pool (and gateway VM unless --no-gateway)
             success = manager.setup_user_range(
-                username, args.base_vmid, args.pool_suffix, club=args.club
+                username,
+                args.base_vmid,
+                args.pool_suffix,
+                club=args.club,
+                skip_gateway=args.no_gateway,
             )
 
             if not success:
-                print(f"✗ Failed to set up gateway for {username}")
+                label = "range" if args.no_gateway else "gateway"
+                print(f"✗ Failed to set up {label} for {username}")
                 continue
 
             # Clone additional VMs if specified
@@ -766,7 +805,7 @@ def handle_range_commands(args, manager: RangeManager):
                     preserve_mac=args.preserve_mac,
                 )
 
-                vnet_name = manager.networks.get_vnet_for_user(username, club=args.club)
+                vnet_name = shared_vnet or manager.networks.get_vnet_for_user(username, club=args.club)
                 if vnet_name:
                     manager.configure_vm_networking(
                         new_vmid,

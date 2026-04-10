@@ -1563,18 +1563,20 @@ class RangeManager:
         username: str,
         pool_suffix: Optional[str] = None,
         club: Optional[str] = None,
+        skip_gateway: bool = False,
     ) -> bool:
         """
         Check if a user already has a complete range setup.
 
         This checks for:
         - User pool exists
-        - User VNet exists
-        - VyOS gateway VM exists with correct name and is in user's pool
+        - User VNet exists (skipped when skip_gateway=True)
+        - VyOS gateway VM exists with correct name and is in user's pool (skipped when skip_gateway=True)
 
         Args:
             username: Username (without realm)
             pool_suffix: Suffix for the pool name (defaults to value from infra.toml)
+            skip_gateway: If True, only check for pool (no VNet or gateway VM required)
 
         Returns:
             True if user has complete setup, False otherwise
@@ -1627,6 +1629,13 @@ class RangeManager:
                     f"{f' (club {club})' if club else ''}"
                 )
                 return False
+
+            if skip_gateway:
+                logger.info(
+                    f"User {username} already has complete range setup (no-gateway mode)"
+                    f"{f' for club {club}' if club else ''}"
+                )
+                return True
 
             # Check if VNet exists (this also returns the name if it exists)
             vnet_name = self.networks.ensure_user_vnet(username, club=club)
@@ -1688,6 +1697,7 @@ class RangeManager:
         base_vmid: Optional[int] = None,
         pool_suffix: Optional[str] = None,
         club: Optional[str] = None,
+        skip_gateway: bool = False,
     ) -> bool:
         """
         Set up a complete range environment for a user.
@@ -1695,8 +1705,8 @@ class RangeManager:
         This includes:
         - Validating user exists in AD realm
         - Creating a dedicated pool
-        - Setting up a VNet
-        - Cloning a gateway VM
+        - Setting up a VNet (skipped when skip_gateway=True)
+        - Cloning a gateway VM (skipped when skip_gateway=True)
         - Setting appropriate permissions
 
         Args:
@@ -1704,6 +1714,8 @@ class RangeManager:
             base_vmid: Base VM ID to clone from (defaults to value from infra.toml)
             pool_suffix: Suffix for the pool name (defaults to value from infra.toml)
             club: Optional club identifier to scope resources
+            skip_gateway: If True, skip VNet and gateway VM creation; additional VMs
+                          should be placed on the shared infranet bridge instead.
 
         Returns:
             True if successful, False otherwise
@@ -1728,7 +1740,7 @@ class RangeManager:
                 return False
 
             # Check if user already has complete range setup
-            if self.user_has_complete_range(username, pool_suffix, club):
+            if self.user_has_complete_range(username, pool_suffix, club, skip_gateway=skip_gateway):
                 logger.info(
                     f"User {username}{f' (club {club})' if club else ''} already has complete range setup, skipping"
                 )
@@ -1739,6 +1751,15 @@ class RangeManager:
             # Ensure pool exists
             if not self.pools.ensure_pool(pool_name):
                 return False
+
+            if skip_gateway:
+                # Set user permissions on pool only (no gateway VM to attach to)
+                self._set_user_permissions(f"{username}@ad", pool_name, None)
+                logger.info(
+                    f"Successfully set up range (no-gateway) for {username}@ad"
+                    f"{f' (club {club})' if club else ''}"
+                )
+                return True
 
             # Ensure VNet exists
             vnet_name = self.networks.ensure_user_vnet(username, club=club)
@@ -1862,21 +1883,25 @@ class RangeManager:
         except Exception as e:
             logger.error(f"Failed to configure networking for VM {vmid}: {e}")
 
-    def _set_user_permissions(self, userid: str, pool_name: str, vmid: int):
-        """Set user permissions on pool and VM."""
+    def _set_user_permissions(self, userid: str, pool_name: str, vmid: Optional[int]):
+        """Set user permissions on pool and, optionally, a specific VM."""
         try:
             # Set permissions on pool
             self.proxmox.access.acl.put(
                 path=f"/pool/{pool_name}", users=userid, roles="Administrator,PVEAdmin"
             )
 
-            # Set permissions on VM
-            self.proxmox.access.acl.put(
-                path=f"/vms/{vmid}", users=userid, roles="Administrator,PVEAdmin"
-            )
-
-            logger.info(
-                f"Set permissions for {userid} on pool {pool_name} and VM {vmid}"
-            )
+            if vmid is not None:
+                # Set permissions on VM
+                self.proxmox.access.acl.put(
+                    path=f"/vms/{vmid}", users=userid, roles="Administrator,PVEAdmin"
+                )
+                logger.info(
+                    f"Set permissions for {userid} on pool {pool_name} and VM {vmid}"
+                )
+            else:
+                logger.info(
+                    f"Set permissions for {userid} on pool {pool_name}"
+                )
         except Exception as e:
             logger.error(f"Failed to set permissions for {userid}: {e}")
