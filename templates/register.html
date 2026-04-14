@@ -1,0 +1,45 @@
+<h2>Get Your VM</h2>
+<p>Tonight's template: <strong>{{ template_label }}</strong></p>
+<p>
+    Pick a username and password. A Proxmox account will be created for you
+    along with a clone of the template above.
+</p>
+{% if error %}
+<p style="color:#f66;"><strong>{{ error }}</strong></p>
+{% endif %}
+<form method="POST" action="/register">
+    <table>
+        <tr>
+            <td><label for="username">Username:</label></td>
+            <td>
+                <input type="text" id="username" name="username"
+                       pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{1,30}"
+                       title="2–31 characters: letters, digits, dots, hyphens, underscores"
+                       required autocomplete="username">
+            </td>
+        </tr>
+        <tr>
+            <td><label for="password">Password:</label></td>
+            <td>
+                <input type="password" id="password" name="password"
+                       minlength="8" required autocomplete="new-password">
+            </td>
+        </tr>
+        <tr>
+            <td><label for="confirm">Confirm password:</label></td>
+            <td>
+                <input type="password" id="confirm" name="confirm"
+                       minlength="8" required autocomplete="new-password">
+            </td>
+        </tr>
+        <tr>
+            <td></td>
+            <td><button type="submit">Create my account &amp; VM</button></td>
+        </tr>
+    </table>
+</form>
+<p><small>
+    Username rules: 2–31 characters, starts with a letter or digit,
+    may contain letters, digits, <code>.</code> <code>-</code> <code>_</code>.
+    Password must be at least 8 characters.
+</small></p>

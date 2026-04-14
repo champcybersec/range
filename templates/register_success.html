@@ -1,0 +1,12 @@
+<h2>You're all set!</h2>
+<p>Your account and VM have been created. Log in with the details below.</p>
+<table>
+    <tr><th>Login URL</th><td><a href="{{ login_url }}" target="_blank" rel="noopener">{{ login_url }}</a></td></tr>
+    <tr><th>Username</th><td><code>{{ username }}@pve</code></td></tr>
+    <tr><th>VM ID</th><td>{{ new_vmid }}</td></tr>
+    <tr><th>Template</th><td>{{ template_label }}</td></tr>
+</table>
+<p style="margin-top:1em;">
+    <strong>Note:</strong> Your VM may take a minute to finish cloning before it appears
+    in the Proxmox console. Refresh the VM list if you don't see it right away.
+</p>

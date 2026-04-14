@@ -1,56 +1,73 @@
 document.addEventListener('DOMContentLoaded', function() {
     const rangeButton = document.querySelector('button[onclick="createRange();"]');
-    rangeButton.addEventListener('click', createRange);
+    if (rangeButton) {
+        rangeButton.addEventListener('click', createRange);
+    }
 });
 
 
-function ensureUsers() {
+function setTemplate() {
+    const vmid = document.getElementById('template-vmid').value;
+    const club = (document.getElementById('template-club').value || '').trim().toUpperCase() || 'TEST';
+    const status = document.getElementById('set-template-status');
 
-    // Get the value of the usernames text field
+    if (!vmid) {
+        status.textContent = 'Please select a template.';
+        return;
+    }
+
+    status.textContent = 'Saving…';
+
+    fetch('/admin/set-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vmid: parseInt(vmid, 10), club }),
+    })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(r) {
+        if (r.ok) {
+            status.textContent = 'Active: ' + r.data.label + ' | namespace: ' + r.data.club + '/username-range';
+        } else {
+            status.textContent = 'Error: ' + (r.data.error || 'unknown');
+        }
+    })
+    .catch(function(e) {
+        status.textContent = 'Network error: ' + e;
+    });
+}
+
+
+function ensureUsers() {
     const usernames = document.getElementById('usernames').value;
 
-    // Check if the value of usernames is blank
     if (usernames.trim() === '') {
         alert('Please enter usernames');
         return;
     }
 
-    // Create a new XMLHttpRequest object
     const xhr = new XMLHttpRequest();
-
-    // Set up the request
     xhr.open('POST', '/ensure', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
 
-    // Set up the callback function
     xhr.onload = function() {
         if (xhr.status === 200) {
-            // Request was successful
-            console.log(xhr.responseText);
             document.getElementById('usernames').value = '';
             alert('All users validated in AD realm: ' + xhr.responseText);
         } else if (xhr.status === 400) {
-            // Validation failed
-            console.error('Validation Error:', xhr.responseText);
             alert('User validation failed: ' + xhr.responseText);
         } else {
-            // Other error
-            console.error('Error:', xhr.status);
             alert('An error occurred during validation');
         }
     };
 
-    // Send the request
     xhr.send(JSON.stringify({ usernames }));
 }
 
+
 function createRange() {
-    alert('Creating range');
-    // Get the value of the usernames text field
     const usernames = document.getElementById('rusernames').value;
     const vmids = document.getElementById('vmids').value;
 
-    // Check if the value of usernames or vmids is blank
     if (usernames.trim() === '' || vmids.trim() === '') {
         document.getElementById('rusernames').value = '';
         document.getElementById('vmids').value = '';
@@ -58,27 +75,19 @@ function createRange() {
         return;
     }
 
-    // Create a new XMLHttpRequest object
     const xhr = new XMLHttpRequest();
-
-    // Set up the request
     xhr.open('POST', '/range', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
 
-    // Set up the callback function
     xhr.onload = function() {
         if (xhr.status === 200) {
-            // Request was successful
-            console.log(xhr.responseText);
             document.getElementById('rusernames').value = '';
             document.getElementById('vmids').value = '';
             alert('Cloning done');
         } else {
-            // Request failed
-            console.error('Error:', xhr.status);
+            alert('Error: ' + xhr.status + ' — ' + xhr.responseText);
         }
     };
 
-    // Send the request
     xhr.send(JSON.stringify({ usernames, vmids }));
 }

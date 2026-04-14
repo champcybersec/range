@@ -13,8 +13,11 @@ and network configurations for training scenarios.
 
 from flask import Flask, render_template, request, make_response, redirect
 from proxmoxer import ProxmoxAPI
+import json
 import os
 import random
+import re
+import string
 import tomli
 import logging
 from typing import Dict, Any, Optional
@@ -67,6 +70,31 @@ SUPER_SECRET = secrets.get("web", {}).get("admin_password", "changeme")
 AUTHK = "yup"  # Authentication cookie value
 
 SELF_SERVICE_CLUB = "TEST"
+
+# ---------------------------------------------------------------------------
+# Runtime state — persisted to a small JSON file so it survives restarts.
+# Stores: active_vmid (the template the admin wants users to clone tonight).
+# ---------------------------------------------------------------------------
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "range_state.json")
+
+
+def _load_state() -> dict:
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_state(state: dict) -> None:
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.warning("Could not persist state to %s: %s", STATE_FILE, e)
+
+
+_state: dict = _load_state()
 
 
 def get_vnet_for_user(
@@ -136,7 +164,11 @@ def home():
     """
     return render_template(
         "page.html",
-        content="<h2>Home</h2><p><a href='/clone'>Clone VM</a><br/><br/><a href='/login'>Admin Login</a>",
+        content=(
+            "<h2>Welcome</h2>"
+            "<p><a href='/register'>Get your VM &rarr;</a></p>"
+            "<p><small><a href='/clone'>AD self-service clone</a> &nbsp;|&nbsp; <a href='/login'>Admin login</a></small></p>"
+        ),
     )
 
 
@@ -186,6 +218,17 @@ def logout():
     return resp
 
 
+def _random_suffix(length: int = 6) -> str:
+    """Generate a random alphanumeric suffix for auto-generated usernames."""
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+
+def _random_password(length: int = 12) -> str:
+    """Generate a random password with letters, digits, and a few symbols."""
+    chars = string.ascii_letters + string.digits + "!@#$%"
+    return "".join(random.choices(chars, k=length))
+
+
 @app.route("/admin")
 def adm():
     """
@@ -197,7 +240,17 @@ def adm():
         Admin page with Proxmox connection info, or redirect to login
     """
     if request.cookies.get("sk-lol") == AUTHK:
-        return render_template("admin.html", prox_login=PROXMOX_USER)
+        try:
+            vm_templates = load_vmids()
+        except Exception:
+            vm_templates = {}
+        return render_template(
+            "admin.html",
+            prox_login=PROXMOX_USER,
+            vm_templates=vm_templates,
+            active_vmid=_state.get("active_vmid"),
+            active_club=_state.get("active_club", "TEST"),
+        )
     else:
         return redirect("/login?next=/admin")
 
@@ -516,6 +569,300 @@ def clone_page():
             e,
         )
         return render_template("page.html", content=f"<h2>Error: {str(e)}</h2>"), 500
+
+
+@app.route("/admin/set-template", methods=["POST"])
+def set_template():
+    """
+    Admin endpoint to set the active event config: VM template + club namespace.
+
+    Expects JSON: {"vmid": 210, "club": "NECCDC"}
+    "club" defaults to "TEST" if omitted or blank — pools are always namespaced.
+
+    Returns:
+        JSON confirmation with active vmid, label, and club.
+    """
+    if request.cookies.get("sk-lol") != AUTHK:
+        return {"error": "Unauthorized"}, 401
+
+    data = request.get_json() or {}
+    try:
+        vmid = int(data["vmid"])
+    except (KeyError, TypeError, ValueError):
+        return {"error": "vmid must be an integer"}, 400
+
+    club = (data.get("club") or "").strip().upper() or "TEST"
+
+    _state["active_vmid"] = vmid
+    _state["active_club"] = club
+    _save_state(_state)
+    logger.info("Event config set: VMID=%s club=%s", vmid, club)
+
+    try:
+        vm_templates = load_vmids()
+        label = vm_templates.get(str(vmid), f"VMID {vmid}")
+    except Exception:
+        label = f"VMID {vmid}"
+
+    return {"active_vmid": vmid, "label": label, "club": club}
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    """
+    Self-service registration page for non-AD users.
+
+    Users pick their own username and password. The system creates a PVE realm
+    account, a dedicated pool, and a clone of the admin-configured template VM,
+    then grants the new user full access to both.
+
+    GET:  Show registration form (includes active template name).
+    POST: Create account + VM, show credentials and login link.
+    """
+    try:
+        vm_templates = load_vmids()
+    except Exception:
+        vm_templates = {}
+
+    active_vmid = _state.get("active_vmid")
+    if not active_vmid:
+        return render_template(
+            "page.html",
+            content=(
+                "<h2>Registration not available</h2>"
+                "<p>No VM template has been configured yet. Please ask an admin to set one.</p>"
+            ),
+        ), 503
+
+    template_label = vm_templates.get(str(active_vmid), f"VMID {active_vmid}")
+
+    if request.method == "GET":
+        return render_template(
+            "page.html",
+            content=render_template(
+                "register.html",
+                template_label=template_label,
+                active_vmid=active_vmid,
+            ),
+        )
+
+    # --- POST: create user + VM ---
+    username = (request.form.get("username") or "").strip().lower()
+    password = request.form.get("password") or ""
+    confirm = request.form.get("confirm") or ""
+
+    # Basic validation
+    if not username:
+        return _register_error("Username is required.", template_label, active_vmid)
+    if not re.match(r'^[a-z0-9][a-z0-9._-]{1,30}$', username):
+        return _register_error(
+            "Username must be 2–31 characters, start with a letter or digit, "
+            "and contain only letters, digits, dots, hyphens, or underscores.",
+            template_label, active_vmid,
+        )
+    if len(password) < 8:
+        return _register_error("Password must be at least 8 characters.", template_label, active_vmid)
+    if password != confirm:
+        return _register_error("Passwords do not match.", template_label, active_vmid)
+
+    userid = f"{username}@pve"
+    if range_manager.users.user_exists(userid):
+        return _register_error(
+            f"Username '{username}' is already taken. Please choose another.",
+            template_label, active_vmid,
+        )
+    if range_manager.users.validate_ad_user(username):
+        return _register_error(
+            f"'{username}' already exists as a domain account — use the "
+            "<a href='/clone'>AD clone page</a> instead, or choose a different username.",
+            template_label, active_vmid,
+        )
+
+    # Create PVE user
+    if not range_manager.users.create_pve_user(username, password):
+        return _register_error("Could not create account — please contact an admin.", template_label, active_vmid), 500
+
+    # Create pool and clone VM
+    club = _state.get("active_club") or "TEST"
+    resource_prefix = build_resource_prefix(username, club)
+    pool_name = f"{resource_prefix}-range"
+    try:
+        infra_config = load_infra_config()
+        infranet_bridge = infra_config.get("networking", {}).get("infranet_bridge", "INFRANET")
+    except Exception:
+        infranet_bridge = "INFRANET"
+
+    if not range_manager.pools.ensure_pool(pool_name):
+        return _register_error("Could not create resource pool — please contact an admin.", template_label, active_vmid), 500
+
+    try:
+        prox = get_proxmox()
+        prox.access.acl.put(path=f"/pool/{pool_name}", users=userid, roles="Administrator,PVEAdmin")
+
+        clone_name = build_vm_clone_name(username, active_vmid, club=club, templates=vm_templates)
+        new_vmid = prox.cluster.nextid.get()
+        prox.nodes(PROXMOX_NODE).qemu(active_vmid).clone.post(
+            newid=new_vmid,
+            name=clone_name,
+            full=0,
+            target=PROXMOX_NODE,
+            pool=pool_name,
+        )
+        prox.nodes(PROXMOX_NODE).qemu(new_vmid).config.post(
+            net0=f"e1000,bridge={infranet_bridge}"
+        )
+        prox.access.acl.put(path=f"/vms/{new_vmid}", users=userid, roles="Administrator,PVEAdmin")
+        logger.info("Self-service: provisioned %s (vmid %s) for %s", clone_name, new_vmid, userid)
+    except Exception as e:
+        logger.error("Self-service clone failed for %s: %s", userid, e)
+        return _register_error(f"VM clone failed: {e} — please contact an admin.", template_label, active_vmid), 500
+
+    return render_template(
+        "page.html",
+        content=render_template(
+            "register_success.html",
+            username=username,
+            new_vmid=new_vmid,
+            template_label=template_label,
+            login_url=f"https://{PROXMOX_HOST}:8006",
+        ),
+    )
+
+
+def _register_error(message: str, template_label: str, active_vmid: int):
+    return render_template(
+        "page.html",
+        content=render_template(
+            "register.html",
+            template_label=template_label,
+            active_vmid=active_vmid,
+            error=message,
+        ),
+    ), 400
+
+
+@app.route("/provision", methods=["POST"])
+def provision():
+    """
+    Provision one or more PVE-realm users with a cloned VM each.
+
+    Admin-only endpoint. Creates users directly in the Proxmox PVE realm (no AD
+    required), creates a pool per user, clones the requested VM template, places
+    the VM on the shared INFRANET bridge, and grants the new user Administrator
+    access to their pool and VM.
+
+    Expects JSON payload:
+        {
+            "vmid": 210,            # template VMID to clone (required)
+            "count": 5,             # number of accounts to create (default 1)
+            "prefix": "user",       # username prefix for bulk auto-generation
+            "username": "alice",    # override for single-user provisioning
+            "password": "s3cr3t"    # override for single-user provisioning
+        }
+
+    Returns:
+        JSON: {"results": [{"username": ..., "password": ..., "vmid": ..., "login_url": ...}, ...]}
+    """
+    if request.cookies.get("sk-lol") != AUTHK:
+        return {"error": "Unauthorized"}, 401
+
+    data = request.get_json() or {}
+
+    try:
+        template_vmid = int(data.get("vmid", 0))
+    except (TypeError, ValueError):
+        return {"error": "Invalid vmid"}, 400
+
+    if not template_vmid:
+        return {"error": "vmid is required"}, 400
+
+    try:
+        count = max(1, min(50, int(data.get("count", 1))))
+    except (TypeError, ValueError):
+        count = 1
+
+    prefix = (data.get("prefix") or "user").strip() or "user"
+
+    try:
+        vm_templates = load_vmids()
+    except Exception:
+        vm_templates = {}
+
+    try:
+        infra_config = load_infra_config()
+        infranet_bridge = infra_config.get("networking", {}).get("infranet_bridge", "INFRANET")
+    except Exception:
+        infranet_bridge = "INFRANET"
+
+    prox = get_proxmox()
+    results = []
+
+    for _ in range(count):
+        if count == 1 and data.get("username"):
+            username = data["username"].strip()
+        else:
+            username = f"{prefix}-{_random_suffix()}"
+
+        if count == 1 and data.get("password"):
+            password = data["password"].strip()
+        else:
+            password = _random_password()
+
+        userid = f"{username}@pve"
+
+        if range_manager.users.user_exists(userid):
+            results.append({"username": username, "error": "User already exists"})
+            continue
+
+        if not range_manager.users.create_pve_user(username, password):
+            results.append({"username": username, "error": "Failed to create PVE user"})
+            continue
+
+        provision_club = _state.get("active_club") or "TEST"
+        pool_name = f"{build_resource_prefix(username, provision_club)}-range"
+        if not range_manager.pools.ensure_pool(pool_name):
+            results.append({"username": username, "password": password, "error": "Failed to create pool"})
+            continue
+
+        try:
+            prox.access.acl.put(
+                path=f"/pool/{pool_name}", users=userid, roles="Administrator,PVEAdmin"
+            )
+        except Exception as e:
+            logger.warning("Failed to set pool ACL for %s: %s", userid, e)
+
+        try:
+            clone_name = build_vm_clone_name(username, template_vmid, club=provision_club, templates=vm_templates)
+            new_vmid = prox.cluster.nextid.get()
+            prox.nodes(PROXMOX_NODE).qemu(template_vmid).clone.post(
+                newid=new_vmid,
+                name=clone_name,
+                full=0,
+                target=PROXMOX_NODE,
+                pool=pool_name,
+            )
+            prox.nodes(PROXMOX_NODE).qemu(new_vmid).config.post(
+                net0=f"e1000,bridge={infranet_bridge}"
+            )
+            prox.access.acl.put(
+                path=f"/vms/{new_vmid}", users=userid, roles="Administrator,PVEAdmin"
+            )
+            logger.info("Provisioned %s (vmid %s) for %s", clone_name, new_vmid, userid)
+            results.append({
+                "username": username,
+                "password": password,
+                "vmid": new_vmid,
+                "login_url": f"https://{PROXMOX_HOST}:8006",
+            })
+        except Exception as e:
+            logger.error("Failed to clone VM %s for %s: %s", template_vmid, userid, e)
+            results.append({
+                "username": username,
+                "password": password,
+                "error": f"Clone failed: {e}",
+            })
+
+    return {"results": results}
 
 
 @app.errorhandler(404)

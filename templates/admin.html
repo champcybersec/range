@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>Range Manager</title>
+        <title>Range Manager — Admin</title>
         <link rel="stylesheet" href="/static/style.css">
     </head>
     <body>
@@ -9,22 +9,62 @@
         <h4>Logged in as: {{ prox_login }}</h4>
         <a href="/logout">Logout</a>
         <hr/>
+
+        <h2>Active Template</h2>
+        <p>
+            <small>
+                Set the VM template users will clone when they visit
+                <a href="/register">/register</a>.
+                Once set, users self-provision without any admin involvement.
+            </small>
+        </p>
+        {% if active_vmid %}
+        <p>
+            Currently: <strong>{{ active_vmid }} — {{ vm_templates.get(active_vmid|string, 'Unknown') }}</strong>
+            &nbsp;|&nbsp; Club namespace: <strong>{{ active_club }}</strong>
+            &nbsp;(pools will be created as <code>{{ active_club }}/username-range</code>)
+        </p>
+        {% else %}
+        <p><em>No template set — self-service registration is currently disabled.</em></p>
+        {% endif %}
+        <form onsubmit="return false;">
+            <label for="template-vmid">Template:</label>
+            <select id="template-vmid">
+                <option value="">— select —</option>
+                {% for vmid, label in vm_templates.items() %}
+                <option value="{{ vmid }}"{% if active_vmid and active_vmid|string == vmid %} selected{% endif %}>
+                    {{ vmid }} — {{ label }}
+                </option>
+                {% endfor %}
+            </select>
+            &nbsp;
+            <label for="template-club">Club / namespace:</label>
+            <input type="text" id="template-club" value="{{ active_club }}"
+                   placeholder="TEST" style="width:8em;" title="Pools are created as CLUB/username-range. Defaults to TEST if blank.">
+            <button type="button" onclick="setTemplate();">Activate</button>
+            <span id="set-template-status"></span>
+        </form>
+
+        <hr/>
         <h2>Validate AD Users</h2>
         <p><small>Validates that users exist in the AD realm before creating ranges.</small></p>
         <form onsubmit="return false;">
-            <label for="usernames">Enter comma-separated list of usernames:</label>
+            <label for="usernames">Comma-separated usernames:</label>
             <input type="text" id="usernames">
             <button type="button" onclick="ensureUsers();">Validate</button>
         </form>
-        <h2>Create Range</h2>
+
+        <hr/>
+        <h2>Create Range (AD users)</h2>
         <form onsubmit="return false;">
-            <label for="vmids">Enter comma-separated list of VMIDs:</label>
+            <label for="vmids">Comma-separated VMIDs:</label>
             <input type="text" id="vmids">
             <br/>
-            <label for="rusernames">Usernames in this range:</label>
+            <label for="rusernames">Usernames:</label>
             <input type="text" id="rusernames">
             <button type="button" onclick="createRange();">Submit</button>
         </form>
+
         <script src="/static/spooky.js"></script>
     </body>
 </html>

@@ -711,6 +711,31 @@ class UserManager:
             logger.error(f"Error deleting user {userid}: {e}")
             return False
 
+    def create_pve_user(self, username: str, password: str, comment: str = "") -> bool:
+        """
+        Create a user in the PVE realm.
+
+        Args:
+            username: Username (without realm)
+            password: Plain-text password for the new user
+            comment: Optional comment to attach to the account
+
+        Returns:
+            True if created successfully, False otherwise
+        """
+        userid = f"{username}@pve"
+        try:
+            self.proxmox.access.users.post(
+                userid=userid,
+                password=password,
+                comment=comment,
+            )
+            logger.info(f"Created PVE user {userid}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create PVE user {userid}: {e}")
+            return False
+
     def purge_pve_users(self, dry_run: bool = False) -> int:
         """
         Delete all users in the 'pve' realm.

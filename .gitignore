@@ -1,6 +1,7 @@
 .passkey
 .pvepw
 secrets.toml
+range_state.json
 range.log
 
 # Byte-compiled / optimized / DLL files
