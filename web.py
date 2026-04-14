@@ -64,6 +64,8 @@ PROXMOX_USER = secrets["proxmox"]["user"]  # e.g. root@pam
 PROXMOX_PASSWORD = secrets["proxmox"]["password"]
 PROXMOX_VERIFY_SSL = secrets["proxmox"].get("verify_ssl", False)
 PROXMOX_NODE = secrets["proxmox"].get("node", "pve")
+# URL shown to end users for Proxmox login — may differ from the internal host
+PROXMOX_PVE_URL = secrets["proxmox"].get("pve_url", PROXMOX_PVE_URL)
 
 # Web application authentication
 SUPER_SECRET = secrets.get("web", {}).get("admin_password", "changeme")
@@ -724,7 +726,7 @@ def register():
             username=username,
             new_vmid=new_vmid,
             template_label=template_label,
-            login_url=f"https://{PROXMOX_HOST}:8006",
+            login_url=PROXMOX_PVE_URL,
         ),
     )
 
@@ -852,7 +854,7 @@ def provision():
                 "username": username,
                 "password": password,
                 "vmid": new_vmid,
-                "login_url": f"https://{PROXMOX_HOST}:8006",
+                "login_url": PROXMOX_PVE_URL,
             })
         except Exception as e:
             logger.error("Failed to clone VM %s for %s: %s", template_vmid, userid, e)
