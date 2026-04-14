@@ -1,42 +1,214 @@
-body {
-    background-color: black;
-    color: white;
-    font-family: monospace;
+:root {
+    --bg:        #0a0f1e;
+    --surface:   #111827;
+    --border:    #1e3a5f;
+    --accent:    #4dd9f0;
+    --accent-dim:#29a8c0;
+    --text:      #cce8f4;
+    --text-muted:#7baec8;
+    --danger:    #f66;
+    --success:   #4df0a0;
 }
 
-h1, h2, h3 {
-    color: green;
+* {
+    box-sizing: border-box;
+}
+
+body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    margin: 0;
+    min-height: 100vh;
+}
+
+/* ── Header / brand bar ────────────────────────────── */
+header {
+    background: var(--surface);
+    border-bottom: 2px solid var(--accent);
+    padding: 0.75rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+}
+
+header img.logo {
+    height: 56px;
+    width: auto;
+}
+
+header .brand {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+}
+
+header .brand-title {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+}
+
+header .brand-sub {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* ── Main content wrapper ──────────────────────────── */
+main {
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem 3rem;
+}
+
+/* ── Flash messages ────────────────────────────────── */
+#flash {
+    background: rgba(77, 217, 240, 0.12);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+}
+
+#flash h3 {
+    margin: 0;
+    color: var(--accent);
+    font-size: 1rem;
+}
+
+/* ── Typography ────────────────────────────────────── */
+h1 {
+    font-size: 1.8rem;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+    margin-top: 0;
+}
+
+h2 {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2rem;
+}
+
+h3, h4 {
+    color: var(--text-muted);
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
 }
 
 a {
-    color: white;
+    color: var(--accent);
+    text-decoration: none;
 }
 
+a:hover {
+    text-decoration: underline;
+    color: #7de8f8;
+}
+
+code {
+    background: var(--border);
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+    font-size: 0.9em;
+    color: var(--accent);
+}
+
+small {
+    color: var(--text-muted);
+}
+
+/* ── Forms ─────────────────────────────────────────── */
 form {
-    margin-top: 20px;
+    margin-top: 1.2rem;
 }
 
 label {
     display: block;
-    margin-bottom: 10px;
+    margin-bottom: 0.4rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
 }
 
-input[type="text"] {
-    background-color: black;
-    color: white;
-    border: 1px solid white;
-    padding: 5px;
+input[type="text"],
+input[type="password"],
+select {
+    background-color: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(77, 217, 240, 0.18);
+}
+
+select option {
+    background: var(--surface);
 }
 
 button {
-    background-color: black;
-    color: white;
-    border: 1px solid white;
-    padding: 5px 10px;
+    background-color: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    padding: 0.45rem 1.1rem;
+    font-size: 0.95rem;
     cursor: pointer;
+    transition: background 0.15s, color 0.15s;
 }
 
 button:hover {
-    background-color: white;
-    color: black;
+    background-color: var(--accent);
+    color: var(--bg);
+}
+
+/* ── Tables ────────────────────────────────────────── */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 0.5rem;
+}
+
+th, td {
+    padding: 0.55rem 0.8rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+th {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* ── Error / success inline ────────────────────────── */
+.error   { color: var(--danger); }
+.success { color: var(--success); }
+
+/* ── Admin-specific status line ────────────────────── */
+.admin-meta {
+    color: var(--text-muted);
+    font-size: 0.88rem;
+    margin-bottom: 0.25rem;
+}
+
+.admin-meta a {
+    margin-left: 1rem;
 }

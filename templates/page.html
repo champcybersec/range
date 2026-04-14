@@ -1,16 +1,26 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
     <head>
-        <title>Range Manager</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>ChampSec Range Manager</title>
         <link rel="stylesheet" href="/static/style.css">
     </head>
     <body>
-        <h1>NECCDC Range Portal</h1>
-        {% if flash %}
-        <div id="flash">
-            <h3>{{ flash }}</h3>
-        </div>
-        {% endif %}
-        {{ content | safe }}
+        <header>
+            <img class="logo" src="/static/champsec_sga.png" alt="ChampSec logo">
+            <div class="brand">
+                <span class="brand-title">ChampSec Range Manager</span>
+                <span class="brand-sub">Champlain College Competitive Cyber</span>
+            </div>
+        </header>
+        <main>
+            {% if flash %}
+            <div id="flash">
+                <h3>{{ flash }}</h3>
+            </div>
+            {% endif %}
+            {{ content | safe }}
+        </main>
     </body>
 </html>
