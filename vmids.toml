@@ -3,6 +3,7 @@
 # Each entry maps a VMID to a human-readable name displayed in the UI
 
 [templates]
+"171" = "Kali Generic - INFRANET"
 "210" = "Linux - Threat Hunting wk1"
 "117" = "Windows - Threat Hunting wk1"
 "129" = "Linux - Inject Night"

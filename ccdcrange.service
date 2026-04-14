@@ -6,9 +6,9 @@ Wants=network-online.target
 [Service]
 Restart=always
 Type=simple
-ExecStart=/home/rangeuser/range/run.sh
-User=rangeuser
-Group=rangeuser
+ExecStart=/home/goober1/range/run.sh
+User=goober1
+Group=goober1
 
 [Install]
 WantedBy=multi-user.target
